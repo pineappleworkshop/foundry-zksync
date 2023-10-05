@@ -531,6 +531,43 @@ impl ZkSolc {
         }
     }
 
+    /// Determines whether a contract should skip the compilation process based on the specified filter.
+    ///
+    /// # Workflow:
+    /// 1. Check Skip File Condition:
+    ///    - Utilizes `should_skip_file` method to check if the contract file name
+    ///      matches the criteria to be skipped based on the filter provided through `--skip` flag.
+    ///
+    /// 2. Validate Source Directory:
+    ///    - Invokes `is_in_sources_dir` to verify that the contract is situated
+    ///      in the 'sources' directory or its subdirectories.
+    ///
+    /// # Arguments
+    ///
+    /// * `self` - A reference to the instance.
+    /// * `contract_path` - A reference to a `Path` instance representing the contract path.
+    /// * `skip_filter` - A `SkipBuildFilter` instance which dictates the filter criteria for skipping files.
+    ///
+    /// # Returns
+    ///
+    /// A `bool` indicating whether or not the contract should skip the compilation.
+    /// Returns `true` if it should skip, and `false` otherwise.
+    pub fn should_skip_compilation(
+        &self,
+        contract_path: &Path,
+        skip_filter: &Vec<SkipBuildFilter>,
+    ) -> bool {
+        if self.should_skip_file(contract_path, skip_filter) {
+            return true;
+        }
+
+        if !self.is_in_sources_dir(contract_path) {
+            return true;
+        }
+
+        false
+    }
+
     /// Determines whether a contract file should be skipped during compilation based on provided filters.
     ///
     /// The function iterates through `skip_filters` and evaluates whether the filename (derived from `contract_path`)
@@ -552,43 +589,6 @@ impl ZkSolc {
     /// # Returns
     ///
     /// A boolean indicating whether the file at `contract_path` should be skipped (`true`) or not (`false`).
-    pub fn should_skip_compilation(
-        &self,
-        contract_path: &Path,
-        skip_filter: &Vec<SkipBuildFilter>,
-    ) -> bool {
-        if self.should_skip_file(contract_path, skip_filter) {
-            return true;
-        }
-
-        if !self.is_in_sources_dir(contract_path) {
-            return true;
-        }
-
-        false
-    }
-
-    /// Determines whether a given file should be skipped during compilation based on provided filters.
-    ///
-    /// The function iterates through the provided `skip_filters` and evaluates whether the filename derived from `contract_path`
-    /// should be skipped during compilation. Two primary checks are performed:
-    /// 1. **Custom Filter**: If a custom filter string is provided, it verifies whether the filename, with or without the `.sol` extension,
-    ///    exactly matches the filter string.
-    /// 2. **Pattern-Based Filters**: For predefined pattern filters (`Tests` and `Scripts`), it checks if the filename ends
-    ///    with the specific pattern (`.t.sol` or `.s.sol`).
-    ///
-    /// The function returns `true` if any of the provided filters indicate that the file should be skipped, and `false` otherwise.
-    /// If the filename cannot be derived from `contract_path`, it also returns `false`.
-    ///
-    /// # Arguments
-    ///
-    /// * `self` - A reference to the instance on which this method is invoked.
-    /// * `contract_path` - A `Path` reference pointing towards the contract file whose skip status needs to be evaluated.
-    /// * `skip_filters` - A vector of `SkipBuildFilter` instances, each indicating a filter logic that specifies which files to skip.
-    ///
-    /// # Returns
-    ///
-    /// A boolean indicating whether the file specified by `contract_path` should be skipped (`true`) or not (`false`) during compilation.
     fn should_skip_file(&self, contract_path: &Path, skip_filters: &Vec<SkipBuildFilter>) -> bool {
         if let Some(file_name) = contract_path.file_name().and_then(OsStr::to_str) {
             return skip_filters.iter().any(|filter| {
