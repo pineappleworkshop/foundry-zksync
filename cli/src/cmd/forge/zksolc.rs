@@ -43,6 +43,7 @@ use semver::Version;
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashSet},
+    ffi::OsStr,
     fmt, fs,
     fs::File,
     io::Write,
@@ -56,6 +57,7 @@ pub struct ZkSolcOpts {
     pub is_system: bool,
     pub force_evmla: bool,
     pub remappings: Vec<RelativeRemapping>,
+    pub skip: Option<Vec<SkipBuildFilter>>,
 }
 
 /// Files that should be compiled with a given solidity version.
@@ -118,6 +120,7 @@ pub struct ZkSolc {
     standard_json: Option<StandardJsonCompilerInput>,
     sources: Option<BTreeMap<Solc, SolidityVersionSources>>,
     remappings: Vec<RelativeRemapping>,
+    skip: Vec<SkipBuildFilter>,
 }
 
 impl fmt::Display for ZkSolc {
@@ -144,6 +147,7 @@ impl ZkSolc {
             standard_json: None,
             sources: None,
             remappings: opts.remappings,
+            skip: opts.skip.unwrap_or_default(),
         }
     }
 
@@ -206,15 +210,9 @@ impl ZkSolc {
         for (solc, version) in sources {
             //configure project solc for each solc version
             for (contract_path, _) in version.1 {
-                // // Check if the contract_path is in 'sources' directory or its subdirectories
-                // let is_in_sources_dir = contract_path
-                //     .ancestors()
-                //     .any(|ancestor| ancestor.starts_with(&self.project.paths.sources));
-
-                // // Skip this file if it's not in the 'sources' directory or its subdirectories
-                // if !is_in_sources_dir {
-                //     continue;
-                // }
+                if self.should_skip_compilation(&contract_path, &self.skip) {
+                    continue;
+                }
 
                 // get standard_json for this contract
                 let mut standard_json = self.project.standard_json_input(&contract_path).unwrap();
@@ -236,7 +234,7 @@ impl ZkSolc {
                 // println!("Data written to {:?}", file_path);
                 //---------------------------------------//
                 //print contract path
-                println!("Contract Path: {:?}", contract_path);
+                // println!("Contract Path: {:?}", contract_path);
 
                 // Apply remappings for each contract dependency solidity approach with debug prints
                 // for (path, source) in &mut standard_json.sources {
@@ -259,7 +257,7 @@ impl ZkSolc {
                     remap_source_path(_path, &self.remappings);
                     // _source.content = self.remap_source_content(_source.content.to_string()).into();
 
-                    // solidity approach to remapping content wip 
+                    // solidity approach to remapping content wip
                     let remapped_content = remap_source_content(&_source.content, &self.remappings);
                     _source.content = remapped_content.into();
                 }
@@ -318,7 +316,7 @@ impl ZkSolc {
                         self.compiler_path,
                         contract_path,
                         &comp_args
-                    )))?
+                    )))?;
                 }
 
                 //Get filename from contract_path
@@ -372,11 +370,10 @@ impl ZkSolc {
         comp_args.push(self.project.allowed_paths.to_string());
         // comp_args.push("--include-path".to_string());
         // comp_args.push("../../../mud/packages".to_string());
-        // comp_args.push("--include-path".to_string());
-        // comp_args.push("./node_modules".to_string());
+        comp_args.push("--include-path".to_string());
+        comp_args.push("./node_modules".to_string());
         // comp_args.push("--include-path".to_string());
         // comp_args.push("/home/shakes/pineapple/mud/mud-pw/mud/packages/contracts/node_modules".to_string());
-        
 
         // Check if system mode is enabled or if the source path contains "is-system"
         if self.is_system || contract_path.to_str().unwrap().contains("is-system") {
@@ -532,6 +529,103 @@ impl ZkSolc {
         } else if has_warning {
             println!("Compiler run completed with warnings");
         }
+    }
+
+    /// Determines whether a contract should skip the compilation process based on the specified filter.
+    ///
+    /// # Workflow:
+    /// 1. Check Skip File Condition:
+    ///    - Utilizes `should_skip_file` method to check if the contract file name
+    ///      matches the criteria to be skipped based on the filter provided through `--skip` flag.
+    ///
+    /// 2. Validate Source Directory:
+    ///    - Invokes `is_in_sources_dir` to verify that the contract is situated
+    ///      in the 'sources' directory or its subdirectories.
+    ///
+    /// # Arguments
+    ///
+    /// * `self` - A reference to the instance.
+    /// * `contract_path` - A reference to a `Path` instance representing the contract path.
+    /// * `skip_filter` - A `SkipBuildFilter` instance which dictates the filter criteria for skipping files.
+    ///
+    /// # Returns
+    ///
+    /// A `bool` indicating whether or not the contract should skip the compilation.
+    /// Returns `true` if it should skip, and `false` otherwise.
+    pub fn should_skip_compilation(
+        &self,
+        contract_path: &Path,
+        skip_filter: &Vec<SkipBuildFilter>,
+    ) -> bool {
+        if self.should_skip_file(contract_path, skip_filter) {
+            return true;
+        }
+
+        if !self.is_in_sources_dir(contract_path) {
+            return true;
+        }
+
+        false
+    }
+
+    /// Checks whether a contract file should be skipped based on provided skip filters.
+    ///
+    /// # Workflow:
+    /// 1. Retrieve File Name:
+    ///    - Extracts the file name from `contract_path`.
+    ///
+    /// 2. Check Against Filters:
+    ///    - Iterates through each `SkipBuildFilter` in the provided vector, retrieving the pattern
+    ///      to match via `file_pattern` method.
+    ///    - Checks whether the file name ends with or contains the determined pattern.
+    ///    - If a match is found with any filter, returns `true` to indicate the file should be skipped.
+    ///
+    /// # Arguments
+    ///
+    /// * `self` - A reference to the instance.
+    /// * `contract_path` - A reference to a `Path` instance representing the contract path.
+    /// * `skip_filters` - A vector of `SkipBuildFilter` instances which dictate the filter criteria for skipping files.
+    ///
+    /// # Returns
+    ///
+    /// A `bool` indicating whether the contract file should be skipped.
+    /// Returns `true` if it should be skipped as per any provided filter, and `false` otherwise.
+    fn should_skip_file(&self, contract_path: &Path, skip_filters: &Vec<SkipBuildFilter>) -> bool {
+        if let Some(file_name) = contract_path.file_name().and_then(OsStr::to_str) {
+            return skip_filters.iter().any(|filter| {
+                match filter {
+                    // Custom filter check for the entire filename (without extension) match
+                    SkipBuildFilter::Custom(custom) => {
+                        let should_skip =
+                            file_name == custom || file_name == format!("{}.sol", custom);
+                        should_skip
+                    }
+                    // Default behavior for Tests and Scripts filter
+                    _ => file_name.ends_with(filter.file_pattern()),
+                }
+            });
+        }
+        false
+    }
+
+    /// Validates if a contract path is within the 'sources' directory or its subdirectories.
+    ///
+    /// # Workflow:
+    /// 1. Ancestor Verification:
+    ///    - Iterates through each ancestor path of `contract_path` using `ancestors`.
+    ///    - Checks if any ancestor path starts with the defined 'sources' path within the project.
+    ///
+    /// # Arguments
+    ///
+    /// * `self` - A reference to the instance.
+    /// * `contract_path` - A reference to a `Path` instance representing the contract path.
+    ///
+    /// # Returns
+    ///
+    /// A `bool` indicating whether the contract is in the 'sources' directory or its subdirectories.
+    /// Returns `true` if it is, and `false` otherwise.
+    fn is_in_sources_dir(&self, contract_path: &Path) -> bool {
+        contract_path.ancestors().any(|ancestor| ancestor.starts_with(&self.project.paths.sources))
     }
 
     // write detailed comment for parse_json_input
@@ -895,14 +989,12 @@ fn replace_imports_with_placeholders(content: String, remappings: &[RelativeRema
 //             };
 //             format!(r#"import {}"{}{}""#, import_prefix, placeholder, canonical_path.to_str().unwrap())
 //         };
-        
 
 //         replaced_content = Regex::new(&pattern).unwrap().replace_all(&replaced_content, replacement_callback).into_owned();
 //     }
 
 //     replaced_content
 // }
-
 
 /// Substitutes remapped paths in the provided content.
 /// The function iteratively replaces placeholders with the corresponding remapped paths.
@@ -969,7 +1061,6 @@ fn substitute_remapped_paths(content: String, remappings: &[RelativeRemapping]) 
 //     substituted
 // }
 
-
 /// Modifies a source file path in-place based on the first applicable remapping found in the provided remappings array.
 ///
 /// The function iterates over each relative remapping in the array. For each remapping, it splits the source path string
@@ -1032,7 +1123,6 @@ fn remap_source_path(source_path: &mut PathBuf, remappings: &[RelativeRemapping]
 //     }
 // }
 
-
 // This uses more of a solidity approach to remapping
 fn remap_source_content(content: &str, remappings: &[RelativeRemapping]) -> String {
     let regex = Regex::new(r#"import\s+((?:\{.*?\}\s+from\s+)?)\s*"(?P<path>[^"]*)""#).unwrap();
@@ -1056,9 +1146,6 @@ fn remap_source_content(content: &str, remappings: &[RelativeRemapping]) -> Stri
     remapped_content
 }
 
-
-
-
 fn remap_solc_style(import_path: &str, remappings: &[RelativeRemapping]) -> String {
     for r in remappings.iter() {
         if let Some(after) = import_path.strip_prefix(&r.name) {
@@ -1067,7 +1154,6 @@ fn remap_solc_style(import_path: &str, remappings: &[RelativeRemapping]) -> Stri
     }
     import_path.to_string()
 }
-
 
 //utilty function to write json to file
 fn write_json_to_file(path: &Path, json: &StandardJsonCompilerInput) -> Result<(), Error> {
@@ -1128,3 +1214,35 @@ fn resolve_import_path(import_path: &str, remappings: &[RelativeRemapping]) -> P
 
 //     Ok(flattened_content)
 // }
+
+/// A filter that excludes matching contracts from the build
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum SkipBuildFilter {
+    /// Exclude all `.t.sol` contracts
+    Tests,
+    /// Exclude all `.s.sol` contracts
+    Scripts,
+    /// Exclude if the file matches
+    Custom(String),
+}
+
+impl SkipBuildFilter {
+    /// Returns the pattern to match against a file
+    fn file_pattern(&self) -> &str {
+        match self {
+            SkipBuildFilter::Tests => ".t.sol",
+            SkipBuildFilter::Scripts => ".s.sol",
+            SkipBuildFilter::Custom(s) => s.as_str(),
+        }
+    }
+}
+
+impl<T: AsRef<str>> From<T> for SkipBuildFilter {
+    fn from(s: T) -> Self {
+        match s.as_ref() {
+            "test" | "tests" => SkipBuildFilter::Tests,
+            "script" | "scripts" => SkipBuildFilter::Scripts,
+            s => SkipBuildFilter::Custom(s.to_string()),
+        }
+    }
+}

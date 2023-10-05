@@ -26,6 +26,7 @@
 /// an easy-to-use interface for contract compilation while taking care of the underlying
 /// complexities.
 use super::build::CoreBuildArgs;
+use super::zksolc::SkipBuildFilter;
 use super::{
     zksolc::{ZkSolc, ZkSolcOpts},
     zksolc_manager::{
@@ -93,6 +94,22 @@ pub struct ZkBuildArgs {
     #[serde(skip)]
     pub use_zksolc: String,
 
+    /// Skip building files whose names contain the given filter.
+    ///
+    /// `test` and `script` are aliases for `.t.sol` and `.s.sol`.
+    #[clap(long, num_args(1..))]
+    #[serde(skip)]
+    pub skip: Option<Vec<SkipBuildFilter>>,
+
+    /// Directories to skip during compilation
+    #[clap(
+        help_heading = "ZkSync Build options",
+        value_name = "SKIP_DIRS",
+        long = "skip-dirs",
+        num_args(1..),
+    )]
+    pub skip_dirs: Vec<String>,
+
     /// A flag indicating whether to enable the system contract compilation mode.
     #[clap(
         help_heading = "ZkSync Compiler options",
@@ -148,6 +165,9 @@ impl Cmd for ZkBuildArgs {
     fn run(self) -> eyre::Result<()> {
         let config = self.try_load_config_emit_warnings()?;
         let mut project = config.project()?;
+
+        // //get skip filters
+        // let filters = self.clone().skip.unwrap_or_default();
 
         //set zk out path
         let zk_out_path = project.paths.root.join("zkout");
@@ -220,6 +240,7 @@ impl ZkBuildArgs {
             is_system: self.is_system,
             force_evmla: self.force_evmla,
             remappings,
+            skip: self.skip.clone(),
         };
 
         let zksolc = ZkSolc::new(zksolc_opts, project);
