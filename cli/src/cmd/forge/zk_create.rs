@@ -57,6 +57,7 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use clap::{Parser, ValueHint};
 use ethers::{
     abi::Abi,
+    etherscan::contract,
     solc::{info::ContractInfo, Project},
     types::Bytes,
 };
@@ -173,7 +174,7 @@ impl ZkCreateArgs {
         let private_key = get_private_key(&self.eth.wallet.private_key)?;
         let rpc_url = get_rpc_url(&self.eth.rpc.url)?;
         let config = Config::from(&self.eth);
-        let chain = get_chain(config.chain_id)?;
+        let chain_id = get_chain(config.chain_id)?.id();
         let mut project = self.opts.project()?;
         project.paths.artifacts = project.paths.root.join("zkout");
 
@@ -208,7 +209,7 @@ impl ZkCreateArgs {
         let constructor_args = self.get_constructor_args(&contract);
 
         let provider = Provider::try_from(rpc_url)?;
-        let wallet = LocalWallet::from_str(&format!("{private_key:?}"))?.with_chain_id(chain);
+        let wallet = LocalWallet::from_str(&format!("{private_key:?}"))?.with_chain_id(chain_id);
         let zk_wallet = ZKSWallet::new(wallet, None, Some(provider), None)?;
 
         let rcpt = zk_wallet
@@ -221,41 +222,18 @@ impl ZkCreateArgs {
         let block_number = rcpt.block_number.expect("Error retrieving block number");
 
         //FILE OUTPUT DEPLOYMENT DATA
-        // Get the current timestamp
-        let now: DateTime<Utc> = Utc::now();
-
-        // Format the timestamp as a string: "YYYYMMDD_HHMMSS"
-        let timestamp = now.format("%Y%m%d_%H%M%S").to_string();
-        let deploy_data_path = Path::new("zk_deploys")
-            .join(&self.contract.name)
-            .join(chain.id().to_string())
-            .join(&timestamp);
-        fs::create_dir_all(&deploy_data_path)
-            .map_err(|e| format!("Failed to create directory {:?}: {}", deploy_data_path, e))
-            .unwrap();
-
         let deploy_data = json!({
             "contract_name": self.contract.name,
-            "timestamp": timestamp,
-            "chain_id": chain.id(),
-            "block_number": block_number,
+            "timestamp": Utc::now().timestamp().to_string(),
+            "chain_id": chain_id.to_string(),
+            "block_number": block_number.to_string(),
             "deployed address": deployed_address,
             "transaction_hash": rcpt.transaction_hash,
-            "gas_price": gas_price,
-            "gas_used": gas_used,
+            "gas_price": gas_price.to_string(),
+            "gas_used": gas_used.to_string(),
         });
 
-        // Store deploy data
-        fs::File::create(deploy_data_path.join("deploy_data.json"))?
-            .write_all(serde_json::to_string_pretty(&deploy_data)?.as_bytes())?;
-
-        // Update latest.json
-        let latest_path = Path::new("zk_deploys")
-            .join(&self.contract.name)
-            .join(chain.id().to_string())
-            .join("latest.json");
-        fs::File::create(&latest_path)?
-            .write_all(serde_json::to_string_pretty(&deploy_data)?.as_bytes())?;
+        save_deploy_data(&deploy_data).await?;
 
         println!("+-------------------------------------------------+");
         println!("Contract successfully deployed to address: {:#?}", deployed_address);
@@ -419,4 +397,40 @@ impl ZkCreateArgs {
         }
         factory_deps
     }
+}
+
+async fn save_deploy_data(deploy_data: &serde_json::Value) -> eyre::Result<()> {
+    let obj = deploy_data.as_object().ok_or_else(|| eyre::eyre!("Deploy data is not an object"))?;
+
+    let chain_id = obj
+        .get("chain_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| eyre::eyre!("Chain ID not found or not a string"))?;
+
+    let contract_name = obj
+        .get("contract_name")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| eyre::eyre!("Contract name not found or not a string"))?;
+
+    let timestamp = obj
+        .get("timestamp")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| eyre::eyre!("Timestamp not found or not a string"))?;
+
+    let deploy_data_path =
+        Path::new("zk_deploys").join(contract_name).join(chain_id).join(timestamp);
+
+    fs::create_dir_all(&deploy_data_path)?;
+
+    // Store deploy data
+    fs::File::create(deploy_data_path.join("deploy_data.json"))?
+        .write_all(serde_json::to_string_pretty(deploy_data)?.as_bytes())?;
+
+    // Update latest.json
+    let latest_path =
+        Path::new("zk_deploys").join(contract_name).join(chain_id).join("latest.json");
+    fs::File::create(&latest_path)?
+        .write_all(serde_json::to_string_pretty(deploy_data)?.as_bytes())?;
+
+    Ok(())
 }
