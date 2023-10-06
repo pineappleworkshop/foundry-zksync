@@ -1,3 +1,4 @@
+use super::zk_build::skip::SkipBuildFilter;
 /// This module provides the implementation of the ZkSolc compiler for Solidity contracts.
 /// ZkSolc is a specialized compiler that supports zero-knowledge (ZK) proofs for smart
 /// contracts.
@@ -210,19 +211,23 @@ impl ZkSolc {
         for (solc, version) in sources {
             //configure project solc for each solc version
             for (contract_path, _) in version.1 {
-                if self.should_skip_compilation(&contract_path, &self.skip) {
-                    continue;
-                }
-
-                // get standard_json for this contract
-                let mut standard_json = self.project.standard_json_input(&contract_path).unwrap();
-
                 // Get the contract filename
                 let filename = contract_path
                     .file_name()
                     .expect("Failed to extract filename")
                     .to_str()
                     .expect("Failed to convert filename to str");
+
+                if self.should_skip_compilation(filename, &self.skip) {
+                    continue;
+                }
+
+                if !self.is_in_sources_dir(&contract_path) {
+                    continue;
+                }
+
+                // get standard_json for this contract
+                let mut standard_json = self.project.standard_json_input(&contract_path).unwrap();
 
                 //---------------------------------------//
                 // Specify the output folder for debug output
@@ -318,13 +323,6 @@ impl ZkSolc {
                         &comp_args
                     )))?;
                 }
-
-                //Get filename from contract_path
-                let filename = contract_path
-                    .file_name()
-                    .expect("Failed to extract filename")
-                    .to_str()
-                    .expect("Failed to convert filename to str");
 
                 // Step 6: Handle Output (Errors and Warnings)
                 self.handle_output(output, filename.to_string(), &mut displayed_warnings);
@@ -554,14 +552,10 @@ impl ZkSolc {
     /// Returns `true` if it should skip, and `false` otherwise.
     pub fn should_skip_compilation(
         &self,
-        contract_path: &Path,
+        file_name: &str,
         skip_filter: &Vec<SkipBuildFilter>,
     ) -> bool {
-        if self.should_skip_file(contract_path, skip_filter) {
-            return true;
-        }
-
-        if !self.is_in_sources_dir(contract_path) {
+        if self.should_skip_file(file_name, skip_filter) {
             return true;
         }
 
@@ -570,7 +564,7 @@ impl ZkSolc {
 
     /// Determines whether a contract file should be skipped during compilation based on provided filters.
     ///
-    /// The function iterates through `skip_filters` and evaluates whether the filename (derived from `contract_path`)
+    /// The function iterates through `skip_filters` and evaluates whether the filename matches any of the filters and
     /// should be skipped during compilation. Two primary checks are performed:
     /// 1. **Custom Filter**: For a custom filter string, it verifies whether the filename, with or without `.sol`,
     ///    exactly matches the filter.
@@ -589,22 +583,18 @@ impl ZkSolc {
     /// # Returns
     ///
     /// A boolean indicating whether the file at `contract_path` should be skipped (`true`) or not (`false`).
-    fn should_skip_file(&self, contract_path: &Path, skip_filters: &Vec<SkipBuildFilter>) -> bool {
-        if let Some(file_name) = contract_path.file_name().and_then(OsStr::to_str) {
-            return skip_filters.iter().any(|filter| {
-                match filter {
-                    // Custom filter check for the entire filename (without extension) match
-                    SkipBuildFilter::Custom(custom) => {
-                        let should_skip =
-                            file_name == custom || file_name == format!("{}.sol", custom);
-                        should_skip
-                    }
-                    // Default behavior for Tests and Scripts filter
-                    _ => file_name.ends_with(filter.file_pattern()),
+    fn should_skip_file(&self, file_name: &str, skip_filters: &Vec<SkipBuildFilter>) -> bool {
+        return skip_filters.iter().any(|filter| {
+            match filter {
+                // Custom filter check for the entire filename (without extension) match
+                SkipBuildFilter::Custom(custom) => {
+                    let should_skip = file_name == custom || file_name == format!("{}.sol", custom);
+                    should_skip
                 }
-            });
-        }
-        false
+                // Default behavior for Tests and Scripts filter
+                _ => file_name.ends_with(filter.file_pattern()),
+            }
+        });
     }
 
     /// Validates if a contract path is within the 'sources' directory or its subdirectories.
@@ -1213,35 +1203,3 @@ fn resolve_import_path(import_path: &str, remappings: &[RelativeRemapping]) -> P
 
 //     Ok(flattened_content)
 // }
-
-/// A filter that excludes matching contracts from the build
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub enum SkipBuildFilter {
-    /// Exclude all `.t.sol` contracts
-    Tests,
-    /// Exclude all `.s.sol` contracts
-    Scripts,
-    /// Exclude if the file matches
-    Custom(String),
-}
-
-impl SkipBuildFilter {
-    /// Returns the pattern to match against a file
-    fn file_pattern(&self) -> &str {
-        match self {
-            SkipBuildFilter::Tests => ".t.sol",
-            SkipBuildFilter::Scripts => ".s.sol",
-            SkipBuildFilter::Custom(s) => s.as_str(),
-        }
-    }
-}
-
-impl<T: AsRef<str>> From<T> for SkipBuildFilter {
-    fn from(s: T) -> Self {
-        match s.as_ref() {
-            "test" | "tests" => SkipBuildFilter::Tests,
-            "script" | "scripts" => SkipBuildFilter::Scripts,
-            s => SkipBuildFilter::Custom(s.to_string()),
-        }
-    }
-}

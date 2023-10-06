@@ -52,6 +52,8 @@ use crate::{
     },
     opts::{EthereumOpts, TransactionOpts},
 };
+use chrono::format::strftime::StrftimeItems;
+use chrono::{DateTime, NaiveDateTime, Utc};
 use clap::{Parser, ValueHint};
 use ethers::{
     abi::Abi,
@@ -60,8 +62,13 @@ use ethers::{
 };
 use eyre::Context;
 use foundry_config::Config;
-use serde_json::Value;
-use std::{fs, path::PathBuf, str::FromStr};
+use serde_json::{json, Value};
+use std::{
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 use zksync_web3_rs::{
     providers::Provider,
     signers::{LocalWallet, Signer},
@@ -161,7 +168,7 @@ impl ZkCreateArgs {
     /// 8. A wallet is set up using the signer and the RPC URL.
     /// 9. The contract deployment is started.
     /// 10. If deployment is successful, the contract address, transaction hash, gas used, gas
-    ///     price, and block number are printed to the console.
+    ///     price, and block number are written to file and printed to the console.
     pub async fn run(self) -> eyre::Result<()> {
         let private_key = get_private_key(&self.eth.wallet.private_key)?;
         let rpc_url = get_rpc_url(&self.eth.rpc.url)?;
@@ -212,6 +219,35 @@ impl ZkCreateArgs {
         let gas_used = rcpt.gas_used.expect("Error retrieving gas used");
         let gas_price = rcpt.effective_gas_price.expect("Error retrieving gas price");
         let block_number = rcpt.block_number.expect("Error retrieving block number");
+
+        //FILE OUTPUT DEPLOYMENT DATA
+        // Get the current timestamp
+        let now: DateTime<Utc> = Utc::now();
+
+        // Format the timestamp as a string: "YYYYMMDD_HHMMSS"
+        let timestamp = now.format("%Y%m%d_%H%M%S").to_string();
+        let deploy_data_path = Path::new("zk_deploys").join(&self.contract.name).join(&timestamp);
+        fs::create_dir_all(&deploy_data_path)
+            .map_err(|e| format!("Failed to create directory {:?}: {}", deploy_data_path, e))
+            .unwrap();
+
+        let deploy_data = json!({
+            "contract_name": self.contract.name,
+            "block_number": block_number,
+            "deployed address": deployed_address,
+            "transaction_hash": rcpt.transaction_hash,
+            "gas_price": gas_price,
+            "gas_used": gas_used,
+        });
+
+        // Store deploy data
+        fs::File::create(deploy_data_path.join("deploy_data.json"))?
+            .write_all(serde_json::to_string_pretty(&deploy_data)?.as_bytes())?;
+
+        // Update latest.json
+        let latest_path = Path::new("zk_deploys").join(&self.contract.name).join("latest.json");
+        fs::File::create(&latest_path)?
+            .write_all(serde_json::to_string_pretty(&deploy_data)?.as_bytes())?;
 
         println!("+-------------------------------------------------+");
         println!("Contract successfully deployed to address: {:#?}", deployed_address);

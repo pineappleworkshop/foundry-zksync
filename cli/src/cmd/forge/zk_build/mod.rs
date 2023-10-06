@@ -1,3 +1,5 @@
+use self::skip::SkipBuildFilter;
+
 /// The `zkbuild` module provides comprehensive functionality for the compilation of zkSync
 /// smart contracts with a specified Solidity compiler version.
 ///
@@ -26,7 +28,6 @@
 /// an easy-to-use interface for contract compilation while taking care of the underlying
 /// complexities.
 use super::build::CoreBuildArgs;
-use super::zksolc::SkipBuildFilter;
 use super::{
     zksolc::{ZkSolc, ZkSolcOpts},
     zksolc_manager::{
@@ -48,6 +49,8 @@ use foundry_config::{
 };
 use serde::Serialize;
 use std::fmt::Debug;
+
+pub mod skip;
 
 foundry_config::merge_impl_figment_convert!(ZkBuildArgs, args);
 

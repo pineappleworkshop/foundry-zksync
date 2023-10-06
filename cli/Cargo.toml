@@ -93,6 +93,7 @@ url = "2.3.1"
 
 ethabi = "18.0.0"
 uint = "0.9.0"
+chrono = "0.4.31"
 
 [dev-dependencies]
 anvil = { path = "../anvil" }
