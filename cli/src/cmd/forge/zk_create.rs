@@ -226,13 +226,18 @@ impl ZkCreateArgs {
 
         // Format the timestamp as a string: "YYYYMMDD_HHMMSS"
         let timestamp = now.format("%Y%m%d_%H%M%S").to_string();
-        let deploy_data_path = Path::new("zk_deploys").join(&self.contract.name).join(&timestamp);
+        let deploy_data_path = Path::new("zk_deploys")
+            .join(&self.contract.name)
+            .join(chain.id().to_string())
+            .join(&timestamp);
         fs::create_dir_all(&deploy_data_path)
             .map_err(|e| format!("Failed to create directory {:?}: {}", deploy_data_path, e))
             .unwrap();
 
         let deploy_data = json!({
             "contract_name": self.contract.name,
+            "timestamp": timestamp,
+            "chain_id": chain.id(),
             "block_number": block_number,
             "deployed address": deployed_address,
             "transaction_hash": rcpt.transaction_hash,
@@ -245,7 +250,10 @@ impl ZkCreateArgs {
             .write_all(serde_json::to_string_pretty(&deploy_data)?.as_bytes())?;
 
         // Update latest.json
-        let latest_path = Path::new("zk_deploys").join(&self.contract.name).join("latest.json");
+        let latest_path = Path::new("zk_deploys")
+            .join(&self.contract.name)
+            .join(chain.id().to_string())
+            .join("latest.json");
         fs::File::create(&latest_path)?
             .write_all(serde_json::to_string_pretty(&deploy_data)?.as_bytes())?;
 
