@@ -32,6 +32,7 @@ use super::zk_build::skip::SkipBuildFilter;
 ///   construct the path and file for saving the compiler output artifacts.
 use ansi_term::Colour::{Red, Yellow};
 use anyhow::{Error, Result};
+use core::panic;
 use ethers::{
     prelude::{artifacts::Source, remappings::RelativeRemapping, Solc},
     solc::{
@@ -50,6 +51,7 @@ use std::{
     path::{Path, PathBuf},
     process::{exit, Command, Stdio},
 };
+use tiny_keccak::Hasher;
 
 #[derive(Debug, Clone)]
 pub struct ZkSolcOpts {
@@ -242,61 +244,145 @@ impl ZkSolc {
                 //---------------------------------------//
 
                 // Specify the output directory
-                let zk_temp_dir = Path::new("zk_temp");
+                // let zk_temp_dir = Path::new("zk_temp");
 
-                // Apply remappings for each contract dependency solidity approach with debug prints
-                // for (path, source) in &mut standard_json.sources {
-                //     // println!("Path: {:?}", path);
-                //     // let resolved_path =
-                //     //     resolve_import_path(path.to_str().unwrap(), &self.remappings);
+                let mut new_main_contract_path = PathBuf::from("src/zk_temp");
+                new_main_contract_path.push(filename);
+                println!("New Main Contract Path: {:?}", new_main_contract_path);
 
-                //     // //print resolved path if it is different from original path
-                //     // if resolved_path.to_str().unwrap() != path.to_str().unwrap() {
-                //     //     println!("Path: {:?}", path);
-                //     //     println!("Resolved Path: {:?}", resolved_path);
-                //     // }
-                //     // *path = resolved_path;
-                //     let remapped_content = remap_source_content(&source.content, &self.remappings);
-                //     source.content = remapped_content.into();
+                let mut written_contract_names_hashes: HashMap<String, [u8; 32]> = HashMap::new();
+                let mut original_to_new_paths: HashMap<String, String> = HashMap::new();
+
+                let mut processed_hashes: Vec<String> = Vec::new();
+                let mut counter = 0;
+
+                let mut all_sources: HashMap<String, &Source> = HashMap::new();
+
+                // for (_path, _source) in &standard_json.sources {
+                //     all_sources.insert(_path.to_str().unwrap().to_string(), _source);
                 // }
 
-                // let mut main_contract_new_path: Option<PathBuf> = None;
-                let mut absolute_new_contract_path = std::env::current_dir()?;
+                for (_path, _source) in &mut standard_json.sources {
+                    let content_hash = get_content_hash(&_source.content);
+                    let content_hash_str = hex::encode(content_hash);
+
+                    all_sources.insert(_path.to_str().unwrap().to_string(), _source);
+
+                    // Check for previous processing
+                    if !processed_hashes.contains(&content_hash_str) {
+                        // If not processed, add to processed_hashes and process source.
+                        processed_hashes.push(content_hash_str);
+
+                        // Process the source here...
+                        let mut is_main_contract = false;
+                        // if _path is contained in contract_path, then it is the main contract
+                        if contract_path.display().to_string().contains(_path.to_str().unwrap()) {
+                            println!("The path is Main contract filename.");
+                            println!("Main Contract Path: {:?}", _path);
+                            is_main_contract = true;
+                        }
+
+                        // Get the contract filename
+                        let original_filename = _path
+                            .file_name()
+                            .expect("Failed to extract filename")
+                            .to_str()
+                            .expect("Failed to convert filename to str");
+
+                        println!("Original Filename: {}", original_filename);
+                        // Calculate new_filename outside remap_all_import_paths to ensure you’re using
+                        // the correct filename when rewriting import statements.
+                        let new_filename = calculate_new_filename(
+                            &original_filename,
+                            &mut written_contract_names_hashes,
+                            &content_hash,
+                        );
+                        println!("New Filename: {}", new_filename);
+
+                        //if main contract, assign new_main_contract_path to original_to_new_paths, or else
+                        //assign new_filename to original_to_new_paths
+                        if is_main_contract {
+                            new_main_contract_path.push(original_filename);
+                            original_to_new_paths.insert(
+                                _path.to_str().unwrap().to_string(),
+                                new_main_contract_path.to_str().unwrap().to_string(),
+                            );
+                            written_contract_names_hashes
+                                .insert(original_filename.to_string(), content_hash);
+                        } else {
+                            original_to_new_paths.insert(
+                                _path.to_str().unwrap().to_string(),
+                                new_filename.to_string(),
+                            );
+                            written_contract_names_hashes
+                                .insert(new_filename.to_string(), content_hash);
+                        }
+
+                        // Rewrite the contract's source code with import paths pointing to the temp folder
+                        let modified_content = remap_all_import_paths(
+                            &_source.content,
+                            &original_to_new_paths,
+                            &mut written_contract_names_hashes,
+                            &mut all_sources,
+                        );
+
+                        // panic!("stop here");
+
+                        // Write the modified contract to the temp folder
+                        if let Some(new_contract_path) = write_contract_to_temp_folder(
+                            filename,
+                            _path,
+                            &modified_content,
+                            // &mut original_to_new_paths,
+                        ) {
+                            println!(
+                                "New Contract Path after write_contract_to_temp_folder: {:?}",
+                                new_contract_path
+                            );
+                            if counter == 1 {
+                                println!("Modified Content: {}", modified_content);
+                                //print written_contract_names_hashes
+                                println!(
+                                    "Written Contract Names Hashes: {:?}",
+                                    written_contract_names_hashes
+                                );
+                                panic!("stop here, counter: {}", counter);
+                            }
+                            // Proceed normally if Some(path) is returned
+                        } else {
+                            // the contract was a duplicate
+                            continue;
+                        }
+
+                        counter += 1;
+                    }
+                }
+                //canonicalize the new_main_contract_path path
+                let new_main_contract_path = fs::canonicalize(new_main_contract_path)?;
+                println!("New Main Contract Path Canon: {:?}", new_main_contract_path);
+                //print original_to_new_paths
+                println!("Original to New Paths: {:?}", original_to_new_paths);
+                //print written_contract_names_hashes
+                println!("Written Contract Names Hashes: {:?}", written_contract_names_hashes);
+
+                panic!("stop here");
 
                 // Apply remappings for each contract dependency
                 for (_path, _source) in &mut standard_json.sources {
-                    // Rewrite the contract's source code with import paths pointing to the temp folder
-                    let modified_content =
-                        remap_all_import_paths(&_source.content, &format!("zk_temp/{}", filename));
 
-                    // Write the modified contract to the temp folder
-                    let new_contract_path =
-                        write_contract_to_temp_folder(filename, _path, &modified_content)?;
+                    // --------------------------//
+                    // remap_source_path(_path, &self.remappings);
+                    // // _source.content = self.remap_source_content(_source.content.to_string()).into();
 
-                    // If this is the main contract, store the new path
-                    // if _path.display().to_string() == contract_path.display().to_string() {
-                    //     main_contract_new_path = Some(new_contract_path);
-                    // }
-
-                    if is_suffix(&contract_path, &_path) {
-                        println!("The path ends with the specified filename.");
-                        println!("Main Contract New Path: {:?}", new_contract_path);
-                        absolute_new_contract_path.push(PathBuf::from(new_contract_path));
-                        println!("Absolute New Contract Path: {:?}", absolute_new_contract_path);
-                    }
-
-                    remap_source_path(_path, &self.remappings);
-                    // _source.content = self.remap_source_content(_source.content.to_string()).into();
-
-                    // solidity approach to remapping content wip
-                    let remapped_content = remap_source_content(&_source.content, &self.remappings);
-                    _source.content = remapped_content.into();
+                    // // solidity approach to remapping content wip
+                    // let remapped_content = remap_source_content(&_source.content, &self.remappings);
+                    // _source.content = remapped_content.into();
                 }
 
                 // get standard_json for this contract
                 // get value from absolute_new_contract_path
-                // let standard_json =
-                //     self.project.standard_json_input(&absolute_new_contract_path).unwrap();
+                let standard_json =
+                    self.project.standard_json_input(&new_main_contract_path).unwrap();
 
                 // let contract_mappings =
                 //     define_contract_mappings(&standard_json.sources, zk_temp_dir)?;
@@ -1216,50 +1302,175 @@ fn resolve_import_path(import_path: &str, remappings: &[RelativeRemapping]) -> P
     PathBuf::from(import_path)
 }
 
-fn remap_all_import_paths(content: &str, _new_folder_path: &str) -> String {
-    // Matches Solidity import statements
+// fn remap_all_import_paths(
+//     content: &str,
+//     original_to_new_paths: &HashMap<String, String>,
+// ) -> String {
+//     // Matches Solidity import statements
+//     let regex =
+//         Regex::new(r#"import\s+((?:\{.*?\}\s+from\s+)?)\s*"(?P<path>[^"]*)"\s*;?"#).unwrap();
+
+//     let modified_content = regex
+//         .replace_all(content, |caps: &regex::Captures| {
+//             let named_imports = caps.get(1).map_or("", |m| m.as_str());
+//             let import_path = caps.name("path").unwrap().as_str();
+//             println!("Import path: {}", import_path);
+
+//             // Replace original path with new path using the HashMap.
+//             let import_filename = original_to_new_paths.get(import_path).unwrap_or_else(|| {
+//                 panic!("Import path {} not found in original_to_new_paths", import_path)
+//             });
+
+//             format!("import {}\"{}\";", named_imports, import_filename)
+//         })
+//         .to_string();
+
+//     modified_content
+// }
+
+fn remap_all_import_paths(
+    content: &str,
+    original_to_new_paths: &HashMap<String, String>,
+    written_contract_names_hashes: &mut HashMap<String, [u8; 32]>,
+    all_sources: &HashMap<String, &Source>,
+) -> String {
+    //print message to console
+    println!("Remapping all import paths...");
     let regex =
         Regex::new(r#"import\s+((?:\{.*?\}\s+from\s+)?)\s*"(?P<path>[^"]*)"\s*;?"#).unwrap();
 
     let modified_content = regex
         .replace_all(content, |caps: &regex::Captures| {
+            let named_imports = caps.get(1).map_or("", |m| m.as_str());
             let import_path = caps.name("path").unwrap().as_str();
+            //get filename from import path
             let import_filename = Path::new(import_path)
                 .file_name()
                 .expect("Failed to extract filename")
                 .to_str()
-                .expect("Failed to convert filename to str");
-            // Using relative path with a single semi-colon
-            format!("import \"./{}\";", import_filename)
+                .expect("Failed to convert filename to str")
+                .to_string();
+            println!("import_filename: {}", import_filename);
+            //print original to new paths
+            println!("Original to New Paths: {:?}", original_to_new_paths);
+
+            let import_filename = match original_to_new_paths.get(&import_filename) {
+                Some(new_path) => {
+                    let path = Path::new(new_path)
+                        .file_name()
+                        .expect("Failed to extract filename")
+                        .to_str()
+                        .expect("Failed to convert filename to str")
+                        .to_string();
+                    println!("Import filename: {}", path);
+                    path
+                }
+                None => {
+                    println!("Import path {} not found in original_to_new_paths", import_filename);
+                    // Extract original filename from the import path
+                    let original_filename = Path::new(&import_filename)
+                        .file_name()
+                        .expect("Failed to extract filename")
+                        .to_str()
+                        .expect("Failed to convert filename to str");
+
+                    println!("Original filename: {}", original_filename);
+
+                    // Try to get the source of the imported contract
+                    let imported_content = &all_sources
+                        .get(&import_filename)
+                        .expect("The source of the imported contract should be available")
+                        .content; // Ensure this is how you access the content in your Source struct
+
+                    // Hash the content of the imported contract
+                    let content_hash = get_content_hash(&imported_content);
+                    calculate_new_filename(
+                        &original_filename,
+                        written_contract_names_hashes,
+                        &content_hash,
+                    )
+                }
+            };
+
+            format!("import {}\"{}\";", named_imports, import_filename)
         })
         .to_string();
 
     modified_content
 }
 
+fn calculate_new_filename(
+    filename: &str,
+    written_contract_names_hashes: &mut HashMap<String, [u8; 32]>,
+    content_hash: &[u8; 32],
+) -> String {
+    let mut new_filename = filename.to_string();
+    println!("Calculating new filename for: {}", filename);
+    println!("New content hash: {:?}", content_hash);
+
+    if let Some(existing_hash) = written_contract_names_hashes.get(&new_filename) {
+        println!("Existing hash found for {}: {:?}", filename, existing_hash);
+        if existing_hash != content_hash {
+            println!("Hash mismatch detected, renaming file...");
+            let mut i = 1;
+            while written_contract_names_hashes.contains_key(&new_filename) {
+                new_filename = format!("{}_{}.sol", filename, i);
+                i += 1;
+            }
+        }
+    }
+    println!("Final filename determined: {}", new_filename);
+    written_contract_names_hashes.insert(new_filename.clone(), content_hash.clone());
+    // Prepend './' to the filename and return it.
+    format!("./{}", new_filename)
+}
+
 fn write_contract_to_temp_folder(
     main_contract_name: &str,
     contract_path: &Path,
     content: &str,
-) -> Result<PathBuf, Error> {
+    // original_to_new_paths: &mut HashMap<String, String>,
+) -> Option<PathBuf> {
+    // Check for filename collision and resolve
+    let original_name = contract_path
+        .file_name()
+        .expect("Failed to extract filename")
+        .to_str()
+        .expect("Failed to convert filename to str");
+
+    let mut filename = original_name.to_string();
+    println!("Filename of contract being processed: {}", filename);
+
     // Specify the temp folder where modified contracts will be written
-    let temp_folder = Path::new("zk_temp");
+    let temp_folder = Path::new("src/zk_temp");
 
     // Create a subfolder for the main contract
     let main_contract_folder = temp_folder.join(main_contract_name);
 
     // Create the temp folder and main contract subfolder if they don't exist
-    fs::create_dir_all(&main_contract_folder)?;
+    fs::create_dir_all(&main_contract_folder).unwrap();
 
-    // Construct the path to write the modified contract inside the main contract subfolder
-    let file_name =
-        contract_path.file_name().expect("Failed to extract filename").to_str().unwrap();
-    let temp_file_path = main_contract_folder.join(&file_name);
+    // Construct new path and write the modified contract
+    let temp_file_path = main_contract_folder.join(&filename);
 
     // Write the modified contract to the temp folder
-    fs::write(&temp_file_path, content)?;
+    fs::write(&temp_file_path, content).unwrap();
 
-    Ok(temp_file_path)
+    // // Insert into original_to_new_paths
+    // let original_path_string = contract_path.to_string_lossy().into_owned();
+    // let new_path_string = if contract_path.file_stem().unwrap() == main_contract_name {
+    //     // If it's the main contract, use the path "src/zk_temp/[main_contract_name]/[filename]"
+    //     format!("src/zk_temp/{}/{}", main_contract_name, filename)
+    // } else {
+    //     // Otherwise, use the filename as is.
+    //     filename.clone()
+    // };
+    // original_to_new_paths.insert(original_path_string, new_path_string);
+
+    // println!("Original to New Paths: {:?}", original_to_new_paths);
+    // panic!("Stopping here");
+
+    Some(temp_file_path)
 }
 
 // Define a function to write content to a file
@@ -1329,4 +1540,31 @@ fn rewrite_imports_and_create_dir(
     }
 
     Ok(())
+}
+
+fn get_content_hash(content: &str) -> [u8; 32] {
+    let mut sha3 = tiny_keccak::Sha3::v256();
+    let mut output = [0u8; 32];
+    sha3.update(content.as_bytes());
+    sha3.finalize(&mut output);
+    output
+}
+
+fn process_and_record_filename(
+    original_filename: &str,
+    original_path: &str,
+    content_hash: &[u8; 32],
+    written_contract_names_hashes: &mut HashMap<String, [u8; 32]>,
+    original_to_new_paths: &mut HashMap<String, String>,
+) -> String {
+    let new_filename =
+        calculate_new_filename(original_filename, written_contract_names_hashes, content_hash);
+
+    // Record in `written_contract_names_hashes`.
+    written_contract_names_hashes.insert(new_filename.clone(), content_hash.clone());
+
+    // Record in `original_to_new_paths`.
+    original_to_new_paths.insert(original_path.to_string(), new_filename.clone());
+
+    new_filename
 }

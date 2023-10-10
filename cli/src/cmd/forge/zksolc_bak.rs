@@ -211,7 +211,7 @@ impl ZkSolc {
             //configure project solc for each solc version
             for (contract_path, _) in version.1 {
                 //print contract path
-                println!("Contract Path: {:?}", contract_path);
+                println!("Contract Path TOP Layer: {:?}", contract_path);
 
                 // Get the contract filename
                 let filename = contract_path
@@ -228,6 +228,11 @@ impl ZkSolc {
                     continue;
                 }
 
+                // //if filename contains "World"
+                // if !filename.contains("CoreModule") {
+                //     continue;
+                // }
+
                 // get standard_json for this contract
                 let mut standard_json = self.project.standard_json_input(&contract_path).unwrap();
 
@@ -241,49 +246,38 @@ impl ZkSolc {
                 // println!("Data written to {:?}", file_path);
                 //---------------------------------------//
 
-                // Specify the output directory
                 let zk_temp_dir = Path::new("zk_temp");
+                if !zk_temp_dir.exists() {
+                    fs::create_dir_all(&zk_temp_dir)?;
+                }
 
-                // Apply remappings for each contract dependency solidity approach with debug prints
-                // for (path, source) in &mut standard_json.sources {
-                //     // println!("Path: {:?}", path);
-                //     // let resolved_path =
-                //     //     resolve_import_path(path.to_str().unwrap(), &self.remappings);
+                // let new_path_mappings =
+                //     rewrite_contracts_and_update_imports(&standard_json.sources, &zk_temp_dir)?;
 
-                //     // //print resolved path if it is different from original path
-                //     // if resolved_path.to_str().unwrap() != path.to_str().unwrap() {
-                //     //     println!("Path: {:?}", path);
-                //     //     println!("Resolved Path: {:?}", resolved_path);
-                //     // }
-                //     // *path = resolved_path;
-                //     let remapped_content = remap_source_content(&source.content, &self.remappings);
-                //     source.content = remapped_content.into();
-                // }
+                // println!("New Path Mappings: {:?}", new_path_mappings);
+
+                process_contract(filename, &contract_path, &standard_json.sources);
+                // process_sources(&standard_json.sources)?;
 
                 // let mut main_contract_new_path: Option<PathBuf> = None;
-                let mut absolute_new_contract_path = std::env::current_dir()?;
+                // let mut absolute_new_contract_path = std::env::current_dir()?;
 
                 // Apply remappings for each contract dependency
                 for (_path, _source) in &mut standard_json.sources {
                     // Rewrite the contract's source code with import paths pointing to the temp folder
-                    let modified_content =
-                        remap_all_import_paths(&_source.content, &format!("zk_temp/{}", filename));
+                    // let modified_content =
+                    //     remap_all_import_paths(&_source.content, &format!("zk_temp/{}", filename));
 
-                    // Write the modified contract to the temp folder
-                    let new_contract_path =
-                        write_contract_to_temp_folder(filename, _path, &modified_content)?;
+                    // // Write the modified contract to the temp folder
+                    // let new_contract_path =
+                    //     write_contract_to_temp_folder(filename, _path, &modified_content)?;
 
-                    // If this is the main contract, store the new path
-                    // if _path.display().to_string() == contract_path.display().to_string() {
-                    //     main_contract_new_path = Some(new_contract_path);
+                    // if is_suffix(&contract_path, &_path) {
+                    //     println!("The path ends with the specified filename.");
+                    //     println!("Main Contract New Path: {:?}", new_contract_path);
+                    //     absolute_new_contract_path.push(PathBuf::from(new_contract_path));
+                    //     println!("Absolute New Contract Path: {:?}", absolute_new_contract_path);
                     // }
-
-                    if is_suffix(&contract_path, &_path) {
-                        println!("The path ends with the specified filename.");
-                        println!("Main Contract New Path: {:?}", new_contract_path);
-                        absolute_new_contract_path.push(PathBuf::from(new_contract_path));
-                        println!("Absolute New Contract Path: {:?}", absolute_new_contract_path);
-                    }
 
                     remap_source_path(_path, &self.remappings);
                     // _source.content = self.remap_source_content(_source.content.to_string()).into();
@@ -293,30 +287,7 @@ impl ZkSolc {
                     _source.content = remapped_content.into();
                 }
 
-                // get standard_json for this contract
-                // get value from absolute_new_contract_path
-                // let standard_json =
-                //     self.project.standard_json_input(&absolute_new_contract_path).unwrap();
-
-                // let contract_mappings =
-                //     define_contract_mappings(&standard_json.sources, zk_temp_dir)?;
-
-                // // 3. Process each contract in contract_mappings
-                // let target_folder = Path::new("path_to_your_target_folder"); // Adjust as per your use case
-                // for contract_mapping in contract_mappings.iter() {
-                //     process_contract(contract_mapping, &standard_json.sources, zk_temp_dir)?;
-                // }
-
                 self.standard_json = Some(standard_json);
-
-                //---------------------------------------//
-                // Specify the output folder for debug output
-                let output_folder = "test3_output";
-                // Construct the complete file path for debug output
-                let mut file_path = PathBuf::from(output_folder);
-                file_path.push(filename.to_owned() + ".json");
-                write_json_to_file(&file_path, &self.standard_json.as_ref().unwrap())?;
-                //---------------------------------------//
 
                 // Parse JSON Input for each Source
                 if let Err(err) = self.parse_json_input(&contract_path) {
@@ -406,9 +377,12 @@ impl ZkSolc {
         comp_args.push(self.project.paths.root.to_str().unwrap().to_string());
         comp_args.push("--allow-paths".to_string());
         comp_args.push(self.project.allowed_paths.to_string());
-        // comp_args.push("--include-path".to_string());
-        // comp_args.push("../../../mud/packages".to_string());
-        // comp_args.push("../../../mud/packages".to_string());
+        comp_args.push("--include-path".to_string());
+        comp_args.push("../../".to_string());
+        comp_args.push("--include-path".to_string());
+        comp_args.push("../../node_modules".to_string());
+        comp_args.push("--include-path".to_string());
+        comp_args.push("../../packages".to_string());
         comp_args.push("--include-path".to_string());
         comp_args.push("./node_modules".to_string());
         // comp_args.push("--include-path".to_string());
@@ -1012,15 +986,19 @@ fn replace_imports_with_placeholders(content: String, remappings: &[RelativeRema
 //         let replacement_callback = |captures: &regex::Captures| -> String {
 //             let matched_path = PathBuf::from(captures.name("rest").unwrap().as_str());
 //             let canonical_path = matched_path.canonicalize().unwrap_or(matched_path);
-//             let import_prefix = if let Some(m) = captures.get(1) {
-//                 m.as_str()
-//             } else {
-//                 ""
-//             };
-//             format!(r#"import {}"{}{}""#, import_prefix, placeholder, canonical_path.to_str().unwrap())
+//             let import_prefix = if let Some(m) = captures.get(1) { m.as_str() } else { "" };
+//             format!(
+//                 r#"import {}"{}{}""#,
+//                 import_prefix,
+//                 placeholder,
+//                 canonical_path.to_str().unwrap()
+//             )
 //         };
 
-//         replaced_content = Regex::new(&pattern).unwrap().replace_all(&replaced_content, replacement_callback).into_owned();
+//         replaced_content = Regex::new(&pattern)
+//             .unwrap()
+//             .replace_all(&replaced_content, replacement_callback)
+//             .into_owned();
 //     }
 
 //     replaced_content
@@ -1129,6 +1107,7 @@ fn remap_source_path(source_path: &mut PathBuf, remappings: &[RelativeRemapping]
 
                 *source_path =
                     PathBuf::from(temp_path.to_str().unwrap().replace("src/src/", "src/"));
+
                 break;
             }
         }
@@ -1163,10 +1142,18 @@ fn remap_source_content(content: &str, remappings: &[RelativeRemapping]) -> Stri
         if let Some(import_path) = captures.name("path") {
             let remapped_path = remap_solc_style(import_path.as_str(), remappings);
             if remapped_path != import_path.as_str() {
-                replacements.push((import_path.as_str().to_string(), remapped_path));
+                // println!("{} -> {}", import_path.as_str(), remapped_path);
+                // //print canonicalized remapped path
+                // let remapped_canon = PathBuf::from(remapped_path.clone()).canonicalize().unwrap();
+                // let remapped_str = remapped_canon.to_str().unwrap();
+                // println!("remapped canonicalized: {}", remapped_str);
+
+                replacements.push((import_path.as_str().to_string(), remapped_path.to_owned()));
             }
         }
     }
+
+    // println!("replacements: {:?}", replacements);
 
     let mut remapped_content = content.to_string();
     for (orig, repl) in replacements {
@@ -1329,4 +1316,288 @@ fn rewrite_imports_and_create_dir(
     }
 
     Ok(())
+}
+
+pub fn process_contract(
+    main_contract_filename: &str,
+    main_contract_path: &Path,
+    sources: &Vec<(PathBuf, Source)>,
+) -> Result<(), Error> {
+    let regex =
+        Regex::new(r#"import\s+((?:\{.*?\}\s+from\s+)?)\s*"(?P<path>[^"]*)"\s*;?"#).unwrap();
+    println!("---->Main Contract Filename: {}", main_contract_filename);
+
+    // Recursively process each source
+    fn process_source(
+        contract_filename: &str,
+        contract_path: &Path,
+        sources: &Vec<(PathBuf, Source)>,
+        regex: &Regex,
+        dir: &Path,
+    ) -> Result<(), Error> {
+        println!("\n----> Processing: {:?}", contract_path);
+
+        // let contract_path_canonicalized = contract_path.canonicalize().unwrap();
+        // for (path, source) in sources.iter() {
+        //     println!("Path: {}", path.display());
+        //     println!("Canonicalized Path: {}", path.canonicalize().unwrap().display());
+        //     println!("Contract Filename process Source: {}", contract_filename);
+        //     println!("Contract Path: {}", contract_path.display());
+        //     //print canonicalized path
+        //     println!("Canonicalized Contract Path: {}", contract_path_canonicalized.display());
+
+        //     //check if path == cananonicalized path
+        //     if path.canonicalize().unwrap() == contract_path_canonicalized {
+        //         println!("Path == Canonicalized Path");
+        //         current_source = Some(source);
+        //         break;
+        //     }
+        // }
+
+        // Attempt to canonicalize the contract path and handle potential errors gracefully
+        let canonicalized_contract_path = contract_path.canonicalize().unwrap_or_else(|e| {
+            eprintln!("Warning: Failed to canonicalize path {:?}: {}", contract_path, e);
+            contract_path.to_path_buf()
+        });
+
+        println!("Contract Path: {}", contract_path.display());
+        println!("Canonicalized Contract Path: {}", canonicalized_contract_path.display());
+        println!("Contract Filename : {}", contract_filename);
+
+        // Check if the contract is in the sources
+        let current_source = sources.iter().find(|(path, _)| {
+            // Attempt to canonicalize the source path and handle potential errors gracefully
+            let canonicalized_path = path.canonicalize().unwrap_or_else(|e| {
+                eprintln!("Warning: Failed to canonicalize path {:?}: {}", path, e);
+                path.clone()
+            });
+
+            // Compare canonicalized paths
+            canonicalized_path == canonicalized_contract_path
+        });
+
+        let current_source = match current_source {
+            Some((_, source)) => source,
+            None => return Err(Error::msg("Source not found")),
+        };
+
+        // Create a folder
+        let folder_path = dir.join(contract_filename);
+        fs::create_dir_all(&folder_path)?;
+
+        println!("Folder Path: {}", folder_path.display());
+
+        // Write current source to a file in the folder
+        fs::write(
+            folder_path
+                .join(&generate_unique_filename(contract_filename, &canonicalized_contract_path)),
+            &current_source.content.to_string(),
+        )?;
+
+        // Extract all import paths
+        let imports: Vec<String> = regex
+            .captures_iter(&current_source.content)
+            .map(|cap| cap["path"].to_string())
+            .collect();
+
+        println!("Imports: {:?}", imports);
+
+        // Recursive call for each import
+        for import_path in imports {
+            // print imprt path
+            println!("Import Path: {}", import_path);
+
+            //get fileneame from import path
+            let import_filename = Path::new(&import_path)
+                .file_name()
+                .expect("Failed to extract filename")
+                .to_str()
+                .unwrap();
+
+            //print import filename
+            println!("Import Filename: {}", import_filename);
+
+            // get canonicalized path
+            let import_path_canonicalized =
+                Path::new(&import_path).canonicalize().unwrap_or_else(|_| {
+                    eprintln!("Warning: Failed to canonicalize path: {:?}", &import_path);
+                    Path::new(&import_path).to_path_buf() // Fall back to the non-canonicalized path
+                });
+
+            //print canonicalized path
+            println!("Canonicalized Import Path: {}", import_path_canonicalized.display());
+
+            let resolved_import_path = if import_path_canonicalized.is_relative() {
+                // If the path is relative, resolve it based on the original contract path's parent directory
+                canonicalized_contract_path.parent().unwrap().join(&import_path_canonicalized)
+            } else {
+                // If the path is absolute, use it as is
+                import_path_canonicalized
+            };
+
+            //print resolved import path
+            println!("Resolved Import Path: {}", resolved_import_path.display());
+
+            process_source(&import_filename, &resolved_import_path, sources, regex, &folder_path)?;
+        }
+
+        Ok(())
+    }
+
+    // Call the function
+    process_source(
+        main_contract_filename,
+        main_contract_path,
+        &sources,
+        &regex,
+        Path::new("zk_temp1"),
+    )
+}
+
+fn generate_unique_filename(name: &str, path: &Path) -> String {
+    // Generate a hash of the path
+    let mut hasher = Sha256::new();
+    hasher.update(path.to_string_lossy().as_bytes());
+    let hash_result = hasher.finalize();
+
+    // Generate a filename incorporating the original name and the hash
+    format!("{}_{}.sol", name, hex::encode(&hash_result))
+}
+
+fn process_sources(sources: &Vec<(PathBuf, Source)>) -> Result<(), Error> {
+    let regex =
+        Regex::new(r#"import\s+((?:\{.*?\}\s+from\s+)?)\s*"(?P<path>[^"]*)"\s*;?"#).unwrap();
+    let (main_contract_path, main_contract_source) = &sources[0];
+    let main_folder_path =
+        create_folder_and_write_file(&main_contract_path, &main_contract_source)?;
+
+    for i in 1..sources.len() {
+        let (import_path, import_source) = &sources[i];
+        let imports: Vec<String> = regex
+            .captures_iter(&import_source.content)
+            .map(|cap| cap["path"].to_string())
+            .collect();
+
+        // This assumes that if a contract is imported by the main contract, it should be placed in the main contract's folder.
+        // Otherwise, it goes in a subfolder named after the contract that imports it.
+        let parent_folder = if i == 1 {
+            main_folder_path.clone()
+        } else {
+            main_folder_path.join(import_path.file_stem().unwrap())
+        };
+
+        // If a contract has its own imports, we create a new subfolder for it.
+        let current_folder = if !imports.is_empty() {
+            parent_folder.join(import_path.file_stem().unwrap())
+        } else {
+            parent_folder
+        };
+
+        create_folder_and_write_file_with_folder(import_path, import_source, &current_folder)?;
+    }
+
+    Ok(())
+}
+
+fn create_folder_and_write_file(path: &Path, source: &Source) -> Result<PathBuf, Error> {
+    //print path
+    println!("Path: {}", path.display());
+    let folder_path = PathBuf::from("zk_temp2").join(path.file_stem().unwrap());
+    println!("Folder Path: {}", folder_path.display());
+    fs::create_dir_all(&folder_path)?;
+    fs::write(folder_path.join(path.file_name().unwrap()), &source.content.to_string())?;
+    Ok(folder_path)
+}
+
+fn create_folder_and_write_file_with_folder(
+    path: &Path,
+    source: &Source,
+    folder: &Path,
+) -> Result<(), Error> {
+    fs::create_dir_all(&folder)?;
+    fs::write(folder.join(path.file_name().unwrap()), &source.content.to_string())?;
+    Ok(())
+}
+
+fn import_has_imports(contract_content: &str) -> bool {
+    let re = Regex::new(r#"import\s+"#).unwrap();
+    re.is_match(contract_content)
+}
+
+fn create_new_folder_for_contract(
+    contract_name: &str,
+    parent_folder_path: &Path,
+) -> Result<PathBuf> {
+    let new_folder_path = parent_folder_path.join(contract_name);
+    fs::create_dir_all(&new_folder_path)?;
+    Ok(new_folder_path)
+}
+
+fn get_direct_imports(contract_content: &str) -> Vec<String> {
+    let re = Regex::new(r#"import\s+"(?P<path>[^"]+)""#).unwrap();
+    re.captures_iter(contract_content).map(|cap| cap["path"].to_string()).collect()
+}
+
+// fn process_contract(main_contract, sources) {
+//     // Write the main contract to base folder
+//     write_contract_to_folder(main_contract, "base_folder_path");
+
+//     // Process Direct Imports
+//     for direct_import in get_direct_imports(main_contract) {
+//         process_import(direct_import, sources, "base_folder_path");
+//     }
+// }
+
+// fn process_import(import, sources, parent_folder_path) {
+//     // Write the import contract to parent folder
+//     write_contract_to_folder(import, &parent_folder_path);
+
+//     // Create a new folder for the import if it has its own imports
+//     if import_has_imports(import, sources) {
+//         new_folder_path = create_new_folder_for_contract(import, &parent_folder_path);
+
+//         // Process the import's imports recursively
+//         for secondary_import in get_direct_imports(import) {
+//             process_import(secondary_import, sources, &new_folder_path);
+//         }
+//     }
+// }
+
+fn rewrite_contracts_and_update_imports(
+    sources: &Vec<(PathBuf, Source)>,
+    base_path: &Path,
+) -> Result<HashMap<String, String>, std::io::Error> {
+    let mut written_files: HashMap<String, String> = HashMap::new();
+    let mut path_mapping = HashMap::new();
+    let mut counter: u32 = 0;
+
+    for (original_path, source) in sources {
+        let content = &source.content;
+
+        if let Some(new_path) = written_files.get(&(**content)) {
+            path_mapping.insert(original_path.to_str().unwrap().to_string(), new_path.clone());
+        } else {
+            let filename = original_path.file_name().unwrap().to_str().unwrap().to_string();
+            let new_filename = format!("{}_{}", counter, filename);
+            let mut new_path = base_path.join(&new_filename);
+
+            while new_path.exists() {
+                counter += 1;
+                let new_filename = format!("{}_{}", counter, filename);
+                new_path = base_path.join(&new_filename);
+            }
+
+            fs::write(&new_path, content.to_string())?;
+
+            let new_path_str = new_path.to_str().unwrap().to_string();
+            written_files.insert(content.to_string(), new_path_str.clone());
+            path_mapping.insert(original_path.to_str().unwrap().to_string(), new_path_str);
+
+            counter += 1;
+        }
+    }
+
+    // Updating import paths can be similar to previous examples.
+
+    Ok(path_mapping)
 }

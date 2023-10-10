@@ -242,7 +242,10 @@ impl ZkSolc {
                 //---------------------------------------//
 
                 // Specify the output directory
-                let zk_temp_dir = Path::new("zk_temp");
+                let zk_temp_dir = Path::new("zk_remapped");
+
+                // Call the compile_and_write_to_temp function
+                // compile_and_write_to_temp(&standard_json.sources, zk_temp_dir)?;
 
                 // Apply remappings for each contract dependency solidity approach with debug prints
                 // for (path, source) in &mut standard_json.sources {
@@ -261,51 +264,51 @@ impl ZkSolc {
                 // }
 
                 // let mut main_contract_new_path: Option<PathBuf> = None;
-                let mut absolute_new_contract_path = std::env::current_dir()?;
+                // let mut absolute_new_contract_path = std::env::current_dir()?;
 
                 // Apply remappings for each contract dependency
-                for (_path, _source) in &mut standard_json.sources {
-                    // Rewrite the contract's source code with import paths pointing to the temp folder
-                    let modified_content =
-                        remap_all_import_paths(&_source.content, &format!("zk_temp/{}", filename));
+                // for (_path, _source) in &mut standard_json.sources {
+                //     // Rewrite the contract's source code with import paths pointing to the temp folder
+                //     let modified_content =
+                //         remap_all_import_paths(&_source.content, &format!("zk_temp/{}", filename));
 
-                    // Write the modified contract to the temp folder
-                    let new_contract_path =
-                        write_contract_to_temp_folder(filename, _path, &modified_content)?;
+                //     // Write the modified contract to the temp folder
+                //     let new_contract_path =
+                //         write_contract_to_temp_folder(filename, _path, &modified_content)?;
 
-                    // If this is the main contract, store the new path
-                    // if _path.display().to_string() == contract_path.display().to_string() {
-                    //     main_contract_new_path = Some(new_contract_path);
-                    // }
+                //     // If this is the main contract, store the new path
+                //     // if _path.display().to_string() == contract_path.display().to_string() {
+                //     //     main_contract_new_path = Some(new_contract_path);
+                //     // }
 
-                    if is_suffix(&contract_path, &_path) {
-                        println!("The path ends with the specified filename.");
-                        println!("Main Contract New Path: {:?}", new_contract_path);
-                        absolute_new_contract_path.push(PathBuf::from(new_contract_path));
-                        println!("Absolute New Contract Path: {:?}", absolute_new_contract_path);
-                    }
+                //     if is_suffix(&contract_path, &_path) {
+                //         println!("The path ends with the specified filename.");
+                //         println!("Main Contract New Path: {:?}", new_contract_path);
+                //         absolute_new_contract_path.push(PathBuf::from(new_contract_path));
+                //         println!("Absolute New Contract Path: {:?}", absolute_new_contract_path);
+                //     }
 
-                    remap_source_path(_path, &self.remappings);
-                    // _source.content = self.remap_source_content(_source.content.to_string()).into();
+                //     // remap_source_path(_path, &self.remappings);
+                //     // // _source.content = self.remap_source_content(_source.content.to_string()).into();
 
-                    // solidity approach to remapping content wip
-                    let remapped_content = remap_source_content(&_source.content, &self.remappings);
-                    _source.content = remapped_content.into();
-                }
+                //     // // solidity approach to remapping content wip
+                //     // let remapped_content = remap_source_content(&_source.content, &self.remappings);
+                //     // _source.content = remapped_content.into();
+                // }
 
                 // get standard_json for this contract
                 // get value from absolute_new_contract_path
                 // let standard_json =
                 //     self.project.standard_json_input(&absolute_new_contract_path).unwrap();
 
-                // let contract_mappings =
-                //     define_contract_mappings(&standard_json.sources, zk_temp_dir)?;
+                let contract_mappings =
+                    define_contract_mappings(&standard_json.sources, zk_temp_dir)?;
 
-                // // 3. Process each contract in contract_mappings
-                // let target_folder = Path::new("path_to_your_target_folder"); // Adjust as per your use case
-                // for contract_mapping in contract_mappings.iter() {
-                //     process_contract(contract_mapping, &standard_json.sources, zk_temp_dir)?;
-                // }
+                // 3. Process each contract in contract_mappings
+                let target_folder = Path::new("path_to_your_target_folder"); // Adjust as per your use case
+                for contract_mapping in contract_mappings.iter() {
+                    process_contract(contract_mapping, &standard_json.sources, zk_temp_dir)?;
+                }
 
                 self.standard_json = Some(standard_json);
 
@@ -1295,6 +1298,52 @@ fn remap_import_paths(content: &str, path_mapping: &HashMap<String, PathBuf>) ->
         .to_string()
 }
 
+struct ContractMapping {
+    original_path: PathBuf,
+    new_relative_path: PathBuf,
+}
+
+fn process_contract(
+    contract_mapping: &ContractMapping,
+    all_contracts: &Vec<(PathBuf, Source)>,
+    base_dir: &Path,
+) -> Result<(), Error> {
+    // Construct new path
+    let new_contract_path = base_dir.join(&contract_mapping.new_relative_path);
+
+    // Ensure directory exists
+    if let Some(parent_dir) = new_contract_path.parent() {
+        fs::create_dir_all(parent_dir)?;
+    }
+
+    // Fetch and rewrite content
+    let content = all_contracts
+        .iter()
+        .find_map(|(path, source)| {
+            if path == &contract_mapping.original_path {
+                Some(&source.content)
+            } else {
+                None
+            }
+        })
+        .ok_or_else(|| Error::msg("Path not found in mapping"))?;
+
+    let rewritten_content = rewrite_imports(content, &base_dir)?;
+
+    // Write rewritten content to new path
+    fs::write(&new_contract_path, &rewritten_content)?;
+
+    // Extract and process imports
+    let imports = parse_and_identify_imports(&contract_mapping.original_path)?;
+    for import_path in imports {
+        let import_mapping =
+            map_imported_contract(&import_path, &contract_mapping.new_relative_path)?;
+        process_contract(&import_mapping, all_contracts, base_dir)?;
+    }
+
+    Ok(())
+}
+
 fn rewrite_imports(contract_content: &str, base_dir: &Path) -> Result<String, Error> {
     let import_regex = Regex::new(r#"import\s+((?:\{.*?\}\s+from\s+)?)\s*"(?P<path>[^"]*)""#)?;
 
@@ -1329,4 +1378,88 @@ fn rewrite_imports_and_create_dir(
     }
 
     Ok(())
+}
+
+fn parse_and_identify_imports(contract_path: &Path) -> Result<Vec<PathBuf>, Error> {
+    let mut dependencies = Vec::new();
+
+    // Load the Solidity file
+    let contract_code = fs::read_to_string(contract_path)?;
+
+    // Regex to find import statements in Solidity
+    let import_regex = Regex::new(r#"import\s+((?:\{.*?\}\s+from\s+)?)\s*"(?P<path>[^"]*)""#)?;
+
+    // Identify and store the import paths in dependencies vector
+    for cap in import_regex.captures_iter(&contract_code) {
+        let import_path_str = cap["path"].to_string();
+        let import_path = PathBuf::from(import_path_str);
+        dependencies.push(import_path);
+    }
+
+    Ok(dependencies)
+}
+
+fn define_contract_mappings(
+    all_contracts: &Vec<(PathBuf, Source)>,
+    target_dir: &Path,
+) -> Result<Vec<ContractMapping>, Error> {
+    let mut mappings = Vec::new();
+
+    for (original_path, _source) in all_contracts.iter() {
+        let new_relative_path = compute_new_relative_path(original_path, target_dir)?;
+        let mapping = ContractMapping { original_path: original_path.clone(), new_relative_path };
+        mappings.push(mapping);
+    }
+
+    Ok(mappings)
+}
+
+fn compute_new_relative_path(original_path: &Path, target_dir: &Path) -> Result<PathBuf, Error> {
+    let filename = original_path
+        .file_name()
+        .ok_or_else(|| Error::msg("Failed to extract filename"))?
+        .to_str()
+        .ok_or_else(|| Error::msg("Filename is not valid UTF-8"))?;
+
+    // Create a sub-folder based on the original path (modify as needed)
+    let sub_folder = original_path.parent().unwrap().file_name().unwrap().to_str().unwrap();
+
+    // Create new path: [target_dir]/[sub_folder]/[filename]
+    let new_path = target_dir.join(sub_folder).join(filename);
+
+    Ok(new_path)
+}
+
+fn map_imported_contract(
+    import_path: &Path,
+    importing_contract_new_path: &Path,
+) -> Result<ContractMapping, Error> {
+    let original_path = importing_contract_new_path.parent().unwrap().join(import_path);
+
+    println!("original_path: {}", original_path.display());
+
+    // You could mimic the folder structure of the original contracts in your
+    // new directory structure or define a new one according to your needs.
+    // Here's a simple example: you might place imported contracts in a subfolder
+    // named after the contract that imports them.
+
+    // Get the name of the importing contract without extension.
+    let importing_contract_name =
+        importing_contract_new_path.file_stem().unwrap().to_str().unwrap();
+
+    println!("importing_contract_name: {}", importing_contract_name);
+
+    // Compute the new relative path for the imported contract.
+    // This places the imported contract in a subfolder named after the
+    // contract that imports it.
+    let new_relative_path = importing_contract_new_path
+        .parent()
+        .unwrap()
+        .join(importing_contract_name)
+        .join(import_path.file_name().unwrap());
+
+    println!("new_relative_path: {}", new_relative_path.display());
+
+    // Create and return the mapping.
+    Ok(ContractMapping { original_path, new_relative_path })
 }
