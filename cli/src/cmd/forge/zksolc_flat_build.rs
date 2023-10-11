@@ -246,11 +246,6 @@ impl ZkSolc {
                 let mut contract_paths_map: HashMap<PathBuf, PathBuf> = HashMap::new();
                 let mut is_main_contract = true;
 
-                // Define directory path
-                let dir_path = format!("zk_temp_1/{}", filename);
-                // Ensure directory exists
-                fs::create_dir_all(&dir_path)?;
-
                 let mut contract_data: HashMap<PathBuf, (String, String)> = HashMap::new(); // To store: (new_path, content)
 
                 // 2. Process each contract in standard_json
@@ -284,6 +279,12 @@ impl ZkSolc {
                     // Update import paths
                     let updated_content =
                         update_import_paths(&_source.content, &contract_name).unwrap();
+
+                    // Define directory path
+                    let dir_path = format!("zk_temp_1/{}", filename);
+
+                    // Ensure directory exists
+                    fs::create_dir_all(&dir_path)?;
 
                     // Store the modified content and the new path without writing to a file
                     let new_file_path = format!("{}/{}.sol", dir_path, contract_name);

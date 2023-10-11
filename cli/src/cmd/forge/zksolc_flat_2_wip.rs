@@ -242,9 +242,6 @@ impl ZkSolc {
                 // println!("Data written to {:?}", file_path);
                 //---------------------------------------//
 
-                // Specify the output directory
-                let zk_temp_dir = Path::new("zk_temp");
-
                 // Apply remappings for each contract dependency solidity approach with debug prints
                 // for (path, source) in &mut standard_json.sources {
                 //     // println!("Path: {:?}", path);
@@ -1323,7 +1320,7 @@ fn write_contract_to_temp_folder(
     written_contract_names_hashes.insert(filename.clone(), content_hash);
 
     // Specify the temp folder where modified contracts will be written
-    let temp_folder = Path::new("src/zk_temp");
+    let temp_folder = Path::new("src/zk_temp_flat_2");
 
     // Create a subfolder for the main contract
     let main_contract_folder = temp_folder.join(main_contract_name);

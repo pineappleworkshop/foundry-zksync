@@ -42,6 +42,7 @@ use ethers::{
 use regex::Regex;
 use semver::Version;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fmt, fs,
@@ -246,7 +247,7 @@ impl ZkSolc {
                 // println!("Data written to {:?}", file_path);
                 //---------------------------------------//
 
-                let zk_temp_dir = Path::new("zk_temp");
+                let zk_temp_dir = Path::new("zk_nested_temp");
                 if !zk_temp_dir.exists() {
                     fs::create_dir_all(&zk_temp_dir)?;
                 }
@@ -1329,6 +1330,7 @@ pub fn process_contract(
 
     // Recursively process each source
     fn process_source(
+        main_contract_filename: &str,
         contract_filename: &str,
         contract_path: &Path,
         sources: &Vec<(PathBuf, Source)>,
@@ -1381,9 +1383,15 @@ pub fn process_contract(
             None => return Err(Error::msg("Source not found")),
         };
 
-        // Create a folder
-        let folder_path = dir.join(contract_filename);
-        fs::create_dir_all(&folder_path)?;
+        let folder_path;
+        // Create a folder conditionally if main contract
+        if contract_filename == main_contract_filename {
+            folder_path = dir.join(main_contract_filename);
+            fs::create_dir_all(&folder_path)?;
+        } else {
+            folder_path = dir.join(main_contract_filename).join(contract_filename);
+            fs::create_dir_all(&folder_path)?;
+        }
 
         println!("Folder Path: {}", folder_path.display());
 
@@ -1438,7 +1446,14 @@ pub fn process_contract(
             //print resolved import path
             println!("Resolved Import Path: {}", resolved_import_path.display());
 
-            process_source(&import_filename, &resolved_import_path, sources, regex, &folder_path)?;
+            process_source(
+                main_contract_filename,
+                &import_filename,
+                &resolved_import_path,
+                sources,
+                regex,
+                &folder_path,
+            )?;
         }
 
         Ok(())
@@ -1447,10 +1462,11 @@ pub fn process_contract(
     // Call the function
     process_source(
         main_contract_filename,
+        main_contract_filename,
         main_contract_path,
         &sources,
         &regex,
-        Path::new("zk_temp1"),
+        Path::new("zk_nested_temp"),
     )
 }
 
