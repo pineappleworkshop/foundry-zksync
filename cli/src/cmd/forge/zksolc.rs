@@ -248,10 +248,9 @@ impl ZkSolc {
 
                 // Define directory path
                 let dir_path = format!("zk_temp_1/{}", filename);
+
                 // Ensure directory exists
                 fs::create_dir_all(&dir_path)?;
-
-                let mut contract_data: HashMap<PathBuf, (String, String)> = HashMap::new(); // To store: (new_path, content)
 
                 // 2. Process each contract in standard_json
                 for (_path, _source) in &mut standard_json.sources {
@@ -266,7 +265,6 @@ impl ZkSolc {
                     if let Some(existing_content) = contract_content_map.get(&contract_name) {
                         if existing_content == &*_source.content {
                             // Same name, same content: Skip this iteration
-                            println!("Same name, same content: Skipping");
                             continue;
                         } else {
                             // Same name, different content: Handle duplicates
@@ -285,23 +283,19 @@ impl ZkSolc {
                     let updated_content =
                         update_import_paths(&_source.content, &contract_name).unwrap();
 
-                    // Store the modified content and the new path without writing to a file
-                    let new_file_path = format!("{}/{}.sol", dir_path, contract_name);
-                    contract_data.insert(_path.clone(), (new_file_path.clone(), updated_content));
-
-                    // // Write contract to file
-                    // let file_path = format!("{}/{}.sol", dir_path, contract_name);
-                    // let mut file = fs::File::create(&file_path)?;
-                    // file.write_all(updated_content.as_bytes())?;
+                    // Write contract to file
+                    let file_path = format!("{}/{}.sol", dir_path, contract_name);
+                    let mut file = fs::File::create(&file_path)?;
+                    file.write_all(updated_content.as_bytes())?;
 
                     // Map the contract name to its content
                     contract_content_map.insert(contract_name, _source.content.to_string());
 
                     // Convert _path to absolute path
-                    let absolute_path = fs::canonicalize(&_path).unwrap_or_else(|_| _path.clone());
+                    // let absolute_path = fs::canonicalize(&_path).unwrap_or_else(|_| _path.clone());
 
                     // Map the original absolute path to the new path
-                    contract_paths_map.insert(absolute_path, PathBuf::from(new_file_path));
+                    contract_paths_map.insert(_path.clone(), PathBuf::from(file_path));
 
                     // Subsequent contracts are not the main contract
                     is_main_contract = false;
@@ -318,29 +312,29 @@ impl ZkSolc {
                 println!("Contract Paths Map: {:?}", contract_paths_map);
 
                 // Iterate through all contracts again to adjust import statements
-                for (original_path, (new_file_path, content)) in &contract_data {
+                for (original_path, new_path) in &contract_paths_map {
                     println!("Original Path: {:?}", original_path);
-                    println!("New Path: {:?}", new_file_path);
-
-                    // Update import paths using the finalized mapping
-                    let updated_content = update_import_paths_with_mapping(
-                        content,
-                        &contract_paths_map,
-                        original_path,
-                    )?;
+                    println!("New Path: {:?}", new_path);
                     // Read the contract content
-                    // let content = fs::read_to_string(new_path)?;
+                    let content = fs::read_to_string(new_path)?;
 
                     println!("Contract Content: {}", content);
 
+                    // Update import paths
+                    let updated_content = update_import_paths_with_mapping(
+                        &content,
+                        &contract_paths_map,
+                        &original_path,
+                    )?;
+
                     //compare content
-                    if &updated_content == content {
+                    if updated_content == content {
                         println!("Content is the same");
                         continue;
                     }
 
-                    // Write the updated content to file
-                    fs::write(new_file_path, updated_content)?;
+                    // Write the adjusted contract back to file
+                    fs::write(new_path, updated_content.as_bytes())?;
                 }
 
                 // get standard_json for this contract
@@ -1402,21 +1396,13 @@ fn update_import_paths(content: &str, _new_folder_path: &str) -> Result<String, 
     Ok(modified_content)
 }
 
-fn resolve_absolute_path(
-    importing_contract_path: &Path,
-    import_statement_path: &str,
-) -> Result<PathBuf, Error> {
+fn resolve_absolute_path(importing_contract_path: &Path, import_statement_path: &str) -> PathBuf {
     let import_path = Path::new(import_statement_path);
     if import_path.is_absolute() {
-        Ok(import_path.to_path_buf())
+        import_path.to_path_buf()
     } else {
-        let importing_contract_dir = importing_contract_path
-            .parent()
-            .ok_or_else(|| anyhow::anyhow!("Failed to get parent directory"))?;
-        importing_contract_dir
-            .join(import_path)
-            .canonicalize()
-            .map_err(|e| anyhow::anyhow!("Failed to canonicalize path: {:?}", e))
+        let importing_contract_dir = importing_contract_path.parent().unwrap();
+        importing_contract_dir.join(import_path).canonicalize().unwrap()
     }
 }
 
@@ -1436,13 +1422,8 @@ fn update_import_paths_with_mapping(
             println!("import_path_str: {:?}", import_path_str);
 
             // Resolve the absolute path of the import statement
-            let import_path_abs = match resolve_absolute_path(current_path, import_path_str) {
-                Ok(path) => path,
-                Err(e) => {
-                    eprintln!("Warning: {}", e);
-                    return format!("import {}\"{}\";", items, import_path_str);
-                }
-            };
+            let import_path_abs = resolve_absolute_path(current_path, import_path_str);
+
             println!("import_path_abs: {:?}", import_path_abs);
 
             // Fetch the new path from the mapping
