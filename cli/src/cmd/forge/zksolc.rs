@@ -246,7 +246,7 @@ impl ZkSolc {
                 let mut contract_content_map: HashMap<String, String> = HashMap::new();
                 let mut contract_paths_map: HashMap<PathBuf, String> = HashMap::new();
                 // this is a map of the importing contract to a tuple (original filename, new filename)
-                let mut changed_filenames: HashMap<String, Vec<(String, String)>> = HashMap::new();
+                let mut changed_filenames: HashMap<PathBuf, Vec<(String, String)>> = HashMap::new();
                 let mut contract_dependencies: HashMap<PathBuf, Vec<String>> = HashMap::new();
 
                 let mut is_main_contract = true;
@@ -283,7 +283,7 @@ impl ZkSolc {
                                     _path.file_name().unwrap().to_str().unwrap().to_string();
                                 let new_filename = format!("{}.sol", contract_name);
                                 changed_filenames
-                                    .entry(filename.to_string())
+                                    .entry(_path.clone())
                                     .or_insert(Vec::new())
                                     .push((original_filename, new_filename));
 
@@ -328,64 +328,43 @@ impl ZkSolc {
 
                 // panic!();
 
-                for (mapped_path, contract_name) in &contract_paths_map {
-                    println!("Processing contract: {}", contract_name);
-                    println!("Mapped Path: {:?}", mapped_path);
+                //loop through contract dependencies map, for each contract check for dependencies
+                //that are in the changed_filenames map, if so, find the new path for that main contract
+                //in the contract_paths_map and update the import path for that dependency in the contract file at the new path
+                //with the new changed filename
+                for (contract_path, dependencies) in &contract_dependencies {
+                    println!("Contract Path: {:?}", contract_path);
+                    println!("Dependencies: {:?}", dependencies);
+                    for dependency in dependencies {
+                        println!("Dependency: {}", dependency);
+                        if let Some(changed_filenames) =
+                            changed_filenames.get(&PathBuf::from(dependency))
+                        {
+                            println!("Changed Filenames: {:?}", changed_filenames);
+                            for (original_filename, new_filename) in changed_filenames {
+                                println!("Original Filename: {}", original_filename);
+                                println!("New Filename: {}", new_filename);
 
-                    // Read the contract content
-                    let content = fs::read_to_string(mapped_path)?;
-
-                    // Update import paths
-                    let updated_content = update_import_paths_with_mapping(
-                        &content,
-                        &contract_paths_map,
-                        &mapped_path,
-                    )?;
-
-                    // Write the adjusted contract back to file
-                    // fs::write(mapped_path, updated_content.as_bytes())?;
+                                //find the new path for the main contract
+                                if let Some(new_path) = contract_paths_map.get(contract_path) {
+                                    println!("New Path: {:?}", new_path);
+                                    //update the import path for the dependency in the contract file at the new path
+                                    let content = fs::read_to_string(new_path)?;
+                                    let updated_content = update_import_path(
+                                        &content,
+                                        &original_filename,
+                                        &new_filename,
+                                    )?;
+                                    // Write the adjusted contract back to file
+                                    fs::write(new_path, updated_content.as_bytes())?;
+                                }
+                            }
+                        }
+                    }
                 }
-                panic!();
-
-                // // Iterate through all contracts again to adjust import statements
-                // for (original_path, new_path) in &contract_paths_map {
-                //     println!("Original Path: {:?}", original_path);
-                //     println!("New Path: {:?}", new_path);
-                //     // Read the contract content
-                //     let content = fs::read_to_string(new_path)?;
-
-                //     println!("Contract Content: {}", content);
-
-                //     // Update import paths
-                //     let updated_content = update_import_paths_with_mapping(
-                //         &content,
-                //         &contract_paths_map,
-                //         &original_path,
-                //     )?;
-
-                //     //compare content
-                //     if updated_content == content {
-                //         println!("Content is the same");
-                //         continue;
-                //     }
-
-                //     // Write the adjusted contract back to file
-                //     fs::write(new_path, updated_content.as_bytes())?;
-                // }
 
                 // get standard_json for this contract
-                // get value from absolute_new_contract_path
-                // let standard_json =
-                //     self.project.standard_json_input(&absolute_new_contract_path).unwrap();
-
-                // let contract_mappings =
-                //     define_contract_mappings(&standard_json.sources, zk_temp_dir)?;
-
-                // // 3. Process each contract in contract_mappings
-                // let target_folder = Path::new("path_to_your_target_folder"); // Adjust as per your use case
-                // for contract_mapping in contract_mappings.iter() {
-                //     process_contract(contract_mapping, &standard_json.sources, zk_temp_dir)?;
-                // }
+                let mut standard_json = self.project.standard_json_input(&contract_path).unwrap();
 
                 self.standard_json = Some(standard_json);
 
@@ -1519,4 +1498,35 @@ fn extract_imports(content: &str) -> Vec<String> {
         imports.push(path.to_string());
     }
     imports
+}
+
+fn update_import_path(
+    content: &str,
+    original_filename: &str,
+    new_filename: &str,
+) -> Result<String, Error> {
+    let regex = Regex::new(r#"import\s+(?P<items>\{.*?\}\s+from\s+)?["'](?P<path>[^"']+)["'];"#)
+        .map_err(|_| anyhow::anyhow!("Failed to compile regex"))?;
+
+    let modified_content = regex
+        .replace_all(content, |caps: &regex::Captures| {
+            let import_path_str = caps.name("path").unwrap().as_str();
+            let items = caps.name("items").map_or("", |m| m.as_str());
+
+            //get filename from import path
+            let import_filename = Path::new(import_path_str)
+                .file_name()
+                .expect("Failed to extract filename")
+                .to_str()
+                .expect("Failed to convert filename to str");
+
+            if import_filename == original_filename {
+                format!("import {}\"./{}\";", items, new_filename)
+            } else {
+                format!("import {}\"{}\";", items, import_path_str)
+            }
+        })
+        .to_string();
+
+    Ok(modified_content)
 }
