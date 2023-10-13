@@ -57,6 +57,7 @@ pub struct ZkSolcOpts {
     pub compiler_path: PathBuf,
     pub is_system: bool,
     pub force_evmla: bool,
+    pub match_contract: Option<String>,
     pub remappings: Vec<RelativeRemapping>,
     pub skip: Option<Vec<SkipBuildFilter>>,
 }
@@ -118,6 +119,7 @@ pub struct ZkSolc {
     compiler_path: PathBuf,
     is_system: bool,
     force_evmla: bool,
+    match_contract: Option<String>,
     standard_json: Option<StandardJsonCompilerInput>,
     sources: Option<BTreeMap<Solc, SolidityVersionSources>>,
     remappings: Vec<RelativeRemapping>,
@@ -145,6 +147,7 @@ impl ZkSolc {
             compiler_path: opts.compiler_path,
             is_system: opts.is_system,
             force_evmla: opts.force_evmla,
+            match_contract: opts.match_contract,
             standard_json: None,
             sources: None,
             remappings: opts.remappings,
@@ -218,6 +221,14 @@ impl ZkSolc {
                     .to_str()
                     .expect("Failed to convert filename to str");
 
+                // Check whether to compile the contract based on --match-contract
+                if let Some(match_str) = &self.match_contract {
+                    if !filename.contains(match_str) {
+                        println!("Skipping {}: does not contain '{}'", filename, match_str);
+                        continue;
+                    }
+                }
+
                 if self.should_skip_compilation(filename, &self.skip) {
                     continue;
                 }
@@ -227,7 +238,15 @@ impl ZkSolc {
                 }
 
                 //skip if in the src/zktemp directory
-                if contract_path.to_str().unwrap().contains("zk_temp_1") {
+                let zk_temp_source_directory_name = "zk_temp";
+
+                // Define directory path
+                let temp_source_directory =
+                    format!("src/{}/{}", zk_temp_source_directory_name, filename);
+
+                // Ensure directory exists
+                fs::create_dir_all(&temp_source_directory)?;
+                if contract_path.to_str().unwrap().contains(zk_temp_source_directory_name) {
                     continue;
                 }
 
@@ -249,16 +268,8 @@ impl ZkSolc {
                 let mut contract_content_map: HashMap<String, String> = HashMap::new();
                 let mut contract_paths_map: HashMap<PathBuf, String> = HashMap::new();
                 // this is a map of the importing contract to a tuple (original filename, new filename)
-                let mut changed_filenames: HashMap<PathBuf, (PathBuf, String, String)> =
-                    HashMap::new();
-                let mut contract_dependencies: HashMap<PathBuf, Vec<String>> = HashMap::new();
+                let mut changed_filenames: HashMap<PathBuf, (PathBuf, String)> = HashMap::new();
                 let mut is_main_contract = true;
-
-                // Define directory path
-                let temp_source_directory = format!("src/zk_temp_1/{}", filename);
-
-                // Ensure directory exists
-                fs::create_dir_all(&temp_source_directory)?;
 
                 //variable to store the new path for the main contract
                 let mut main_contract_new_path = format!("{}/{}", temp_source_directory, filename);
@@ -295,16 +306,9 @@ impl ZkSolc {
                                 //join new_path with project root path to get absolute path
                                 let new_path = self.project.paths.root.join(new_path);
 
-                                //populate changed_filenames
-                                let original_filename =
-                                    path.file_name().unwrap().to_str().unwrap().to_string();
+                                //populate changed_filenames map
                                 let new_filename = format!("{}.sol", contract_name);
-                                changed_filenames.insert(
-                                    path.clone(),
-                                    (new_path, original_filename, new_filename),
-                                );
-
-                                // println!("Changed Filenames: {:?}", changed_filenames);
+                                changed_filenames.insert(path.clone(), (new_path, new_filename));
                             } else {
                                 //store the new path for the main contract
                                 main_contract_new_path =
@@ -333,7 +337,7 @@ impl ZkSolc {
                     let path = path.canonicalize()?;
 
                     // Update import paths
-                    let (updated_content, imported_files) = update_import_paths(
+                    let updated_content = update_import_paths(
                         &source.content,
                         &path.canonicalize()?,
                         &changed_filenames,
@@ -341,7 +345,7 @@ impl ZkSolc {
                     .unwrap();
 
                     // Add dependencies to contract dependencies map for this contract
-                    contract_dependencies.insert(path.clone(), imported_files);
+                    // contract_dependencies.insert(path.clone(), imported_files);
 
                     // Write contract to file
                     let new_path = contract_paths_map.get(&path).unwrap();
@@ -357,7 +361,7 @@ impl ZkSolc {
                 }
 
                 // get standard json for rewritten contract
-                let main_path = PathBuf::from(main_contract_new_path).canonicalize()?;
+                let main_path = PathBuf::from(main_contract_new_path.clone()).canonicalize()?;
 
                 let standard_json = self.project.standard_json_input(&main_path).unwrap();
 
@@ -383,7 +387,6 @@ impl ZkSolc {
                 // Run Compiler and Handle Output
                 let mut cmd = Command::new(&self.compiler_path);
                 let mut child = cmd
-                    // .arg(contract_path.clone())
                     .args(&comp_args)
                     .stdin(Stdio::piped())
                     .stderr(Stdio::piped())
@@ -459,13 +462,8 @@ impl ZkSolc {
         comp_args.push(self.project.allowed_paths.to_string());
         // comp_args.push("--include-path".to_string());
         // comp_args.push("../../../mud/packages".to_string());
-        // comp_args.push("../../../mud/packages".to_string());
         // comp_args.push("--include-path".to_string());
         // comp_args.push("./node_modules".to_string());
-        // comp_args.push("--include-path".to_string());
-        // comp_args.push(
-        //     "/home/shakes/pineapple/mud/mud-pw/baseline-project/packages/contracts/".to_string(),
-        // );
 
         // Check if system mode is enabled or if the source path contains "is-system"
         if self.is_system || contract_path.to_str().unwrap().contains("is-system") {
@@ -1260,12 +1258,10 @@ fn write_json_to_file(path: &Path, json: &StandardJsonCompilerInput) -> Result<(
 fn update_import_paths(
     content: &str,
     contract_path: &Path,
-    changed_filenames: &HashMap<PathBuf, (PathBuf, String, String)>,
-) -> Result<(String, Vec<String>), String> {
+    changed_filenames: &HashMap<PathBuf, (PathBuf, String)>,
+) -> Result<(String), String> {
     let regex = Regex::new(r#"import\s+(?P<items>\{.*?\}\s+from\s+)?["'](?P<path>[^"']+)["'];"#)
         .map_err(|_| "Failed to compile regex".to_string())?;
-
-    let mut imported_filenames = Vec::new();
 
     let contract_dir = contract_path.parent().ok_or("Failed to get contract directory")?;
 
@@ -1298,15 +1294,13 @@ fn update_import_paths(
 
             // check if final path is in changed_filenames, if so
             // update import_filename to the new filename
-            if let Some((_, _, new_filename)) = changed_filenames.get(&PathBuf::from(&final_path)) {
+            if let Some((_, new_filename)) = changed_filenames.get(&PathBuf::from(&final_path)) {
                 import_filename = new_filename;
             }
-
-            imported_filenames.push(final_path);
 
             format!("import {}\"./{}\";", items, import_filename)
         })
         .to_string();
 
-    Ok((modified_content, imported_filenames))
+    Ok(modified_content)
 }

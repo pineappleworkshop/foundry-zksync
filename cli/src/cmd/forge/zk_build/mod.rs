@@ -97,6 +97,15 @@ pub struct ZkBuildArgs {
     #[serde(skip)]
     pub use_zksolc: String,
 
+    /// Compile contracts that contain the specified string in their filename.
+    #[clap(
+        help_heading = "ZkSync Compiler options",
+        help = "Compile only the contracts that contain the specified string in their filename.",
+        long = "match-contract",
+        value_name = "CONTRACT_NAME_MATCH"
+    )]
+    pub match_contract: Option<String>,
+
     /// Skip building files whose names contain the given filter.
     ///
     /// `test` and `script` are aliases for `.t.sol` and `.s.sol`.
@@ -104,15 +113,14 @@ pub struct ZkBuildArgs {
     #[serde(skip)]
     pub skip: Option<Vec<SkipBuildFilter>>,
 
-    /// Directories to skip during compilation
-    #[clap(
-        help_heading = "ZkSync Build options",
-        value_name = "SKIP_DIRS",
-        long = "skip-dirs",
-        num_args(1..),
-    )]
-    pub skip_dirs: Vec<String>,
-
+    // /// Directories to skip during compilation
+    // #[clap(
+    //     help_heading = "ZkSync Build options",
+    //     value_name = "SKIP_DIRS",
+    //     long = "skip-dirs",
+    //     num_args(1..),
+    // )]
+    // pub skip_dirs: Vec<String>,
     /// A flag indicating whether to enable the system contract compilation mode.
     #[clap(
         help_heading = "ZkSync Compiler options",
@@ -242,6 +250,7 @@ impl ZkBuildArgs {
             compiler_path: zksolc_manager.get_full_compiler_path(),
             is_system: self.is_system,
             force_evmla: self.force_evmla,
+            match_contract: self.match_contract.clone(),
             remappings,
             skip: self.skip.clone(),
         };
