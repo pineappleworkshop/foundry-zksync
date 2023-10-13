@@ -52,12 +52,10 @@ use crate::{
     },
     opts::{EthereumOpts, TransactionOpts},
 };
-use chrono::format::strftime::StrftimeItems;
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::Utc;
 use clap::{Parser, ValueHint};
 use ethers::{
     abi::Abi,
-    etherscan::contract,
     solc::{info::ContractInfo, Project},
     types::Bytes,
 };
