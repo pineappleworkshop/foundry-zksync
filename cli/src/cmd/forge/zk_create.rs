@@ -183,11 +183,21 @@ impl ZkCreateArgs {
             }
         };
 
+        //write bytecode to file as string
+        let mut file = fs::File::create("bytecode_main.txt").unwrap();
+        file.write_all(format!("{:?}\n", bytecode).as_bytes()).unwrap();
+
+        // //check for additional factory deps
+        // let factory_dependencies = self
+        //     .factory_deps
+        //     .as_ref()
+        //     .map(|fdep_contract_info| self.get_factory_dependencies(&project, fdep_contract_info));
+
         //check for additional factory deps
-        let factory_dependencies = self
-            .factory_deps
-            .as_ref()
-            .map(|fdep_contract_info| self.get_factory_dependencies(&project, fdep_contract_info));
+        let factory_dependencies = self.get_factory_dependencies_from_source(&project);
+
+        //print factory dependencies
+        // println!("factory dependencies: {:?}", factory_dependencies);
 
         // get abi
         let abi = match Self::get_abi_from_contract(&project, &self.contract) {
@@ -304,9 +314,14 @@ impl ZkCreateArgs {
         project: &Project,
         contract_info: &ContractInfo,
     ) -> eyre::Result<Bytes> {
+        //print contract info
+        println!("contract info: {:?}", contract_info);
         let output_path = Self::get_path_for_contract_output(project, contract_info);
+        println!("output path: {:?}", output_path);
         let contract_output = Self::get_contract_output(output_path)?;
+        // println!("contract output: {:?}", contract_output);
         let contract_file_codes = &contract_output[contract_info.path.as_ref().unwrap()];
+        // println!("contract file codes: {:?}", contract_file_codes);
         serde_json::from_value(
             contract_file_codes[&contract_info.name]["evm"]["bytecode"]["object"].clone(),
         )
@@ -395,6 +410,54 @@ impl ZkCreateArgs {
         }
         factory_deps
     }
+
+    fn get_factory_dependencies_from_source(&self, project: &Project) -> Option<Vec<Vec<u8>>> {
+        let mut factory_deps = Vec::new();
+
+        //print contract info
+        println!("contract info: {:?}", self.contract);
+        let output_path = Self::get_path_for_contract_output(project, &self.contract);
+        println!("output path: {:?}", output_path);
+        let contract_output = Self::get_contract_output(output_path).unwrap();
+        println!(
+            "contract output: {:?}",
+            contract_output[self.contract.path.as_ref().unwrap()][self.contract.name.clone()]
+                ["factoryDependencies"]
+        );
+
+        // let depps = Self::get_factory_deps_from_contract(project, &self.contract, &contract_output);
+        let dep_paths = contract_output[self.contract.path.as_ref().unwrap()]
+            [self.contract.name.clone()]["factoryDependencies"]
+            .as_object()
+            .unwrap()
+            .values();
+
+        for path in dep_paths {
+            println!("Factory Dependency Detected - Path: {:?}", path.as_str().unwrap());
+
+            // Now, use each path to retrieve the bytecode of the imported contract
+            if let Ok(dep_bytecode) = get_bytecode_from_imported_contract(
+                &project,
+                &contract_output,
+                path.as_str().unwrap(),
+            ) {
+                println!("Imported Contract Bytecode: {:?}", dep_bytecode);
+                //write bytecode to file as string
+                let mut file = fs::File::create("bytecode.txt").unwrap();
+                file.write_all(format!("{:?}\n", dep_bytecode).as_bytes()).unwrap();
+
+                factory_deps.push(dep_bytecode.to_vec());
+            } else {
+                println!("Failed to retrieve bytecode for imported contract: {:?}", path);
+            }
+        }
+
+        if factory_deps.is_empty() {
+            None
+        } else {
+            Some(factory_deps)
+        }
+    }
 }
 
 async fn save_deploy_data(deploy_data: &serde_json::Value) -> eyre::Result<()> {
@@ -431,4 +494,28 @@ async fn save_deploy_data(deploy_data: &serde_json::Value) -> eyre::Result<()> {
         .write_all(serde_json::to_string_pretty(deploy_data)?.as_bytes())?;
 
     Ok(())
+}
+
+fn get_bytecode_from_imported_contract(
+    project: &Project,
+    contracts_data: &serde_json::Value,
+    contract_path: &str,
+) -> eyre::Result<Bytes> {
+    //new ContractInfo from path
+    let dep_contract_info = ContractInfo::new(contract_path);
+    println!("dep contract info: {:?}", dep_contract_info);
+
+    if let Some(contract_data) =
+        contracts_data[dep_contract_info.path.unwrap()][dep_contract_info.name].as_object()
+    {
+        if let Some(bytecode) = contract_data["evm"]["bytecode"]["object"].as_str() {
+            // Convert the bytecode hex string to bytes
+            let bytecode_bytes = hex::decode(bytecode)?;
+            Ok(Bytes::from(bytecode_bytes))
+        } else {
+            Err(eyre::eyre!("Bytecode not found for contract: {}", contract_path))
+        }
+    } else {
+        Err(eyre::eyre!("Contract not found: {}", contract_path))
+    }
 }
