@@ -261,15 +261,15 @@ impl ZkSolc {
                 let mut contract_path_to_compile = contract_path.clone();
                 if !self.remap_local {
                     // Apply remappings for each contract dependency
-                    for (path, source) in &mut standard_json.sources {
-                        remap_source_path(path, &self.remappings);
-                        // source.content = self.remap_source_content(source.content.to_string()).into();
+                    // for (path, source) in &mut standard_json.sources {
+                    //     remap_source_path(path, &self.remappings);
+                    //     // source.content = self.remap_source_content(source.content.to_string()).into();
 
-                        // solidity approach to remapping content wip
-                        let remapped_content =
-                            remap_source_content(&source.content, &self.remappings);
-                        source.content = remapped_content.into();
-                    }
+                    //     // solidity approach to remapping content wip
+                    //     let remapped_content =
+                    //         remap_source_content(&source.content, &self.remappings);
+                    //     source.content = remapped_content.into();
+                    // }
                 } else {
                     // Compile Locally
                     // Define directory path
