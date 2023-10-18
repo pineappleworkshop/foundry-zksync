@@ -398,7 +398,7 @@ impl ZkCreateArgs {
     ///
     /// A vector of vectors of bytes that represents the bytecode of each factory dependency
     /// contract.
-    fn get_factory_dependencies(
+    fn _get_factory_dependencies(
         &self,
         project: &Project,
         fdep_contract_info: &[ContractInfo],
@@ -436,11 +436,9 @@ impl ZkCreateArgs {
             println!("Factory Dependency Detected - Path: {:?}", path.as_str().unwrap());
 
             // Now, use each path to retrieve the bytecode of the imported contract
-            if let Ok(dep_bytecode) = get_bytecode_from_imported_contract(
-                &project,
-                &contract_output,
-                path.as_str().unwrap(),
-            ) {
+            if let Ok(dep_bytecode) =
+                get_bytecode_from_imported_contract(&contract_output, path.as_str().unwrap())
+            {
                 println!("Imported Contract Bytecode: {:?}", dep_bytecode);
                 //write bytecode to file as string
                 let mut file = fs::File::create("bytecode.txt").unwrap();
@@ -497,7 +495,6 @@ async fn save_deploy_data(deploy_data: &serde_json::Value) -> eyre::Result<()> {
 }
 
 fn get_bytecode_from_imported_contract(
-    project: &Project,
     contracts_data: &serde_json::Value,
     contract_path: &str,
 ) -> eyre::Result<Bytes> {
