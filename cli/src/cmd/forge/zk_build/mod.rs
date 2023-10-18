@@ -1,3 +1,5 @@
+use self::skip::SkipBuildFilter;
+
 /// The `zkbuild` module provides comprehensive functionality for the compilation of zkSync
 /// smart contracts with a specified Solidity compiler version.
 ///
@@ -35,6 +37,7 @@ use super::{
 use crate::cmd::{Cmd, LoadConfig};
 use clap::Parser;
 use ethers::prelude::Project;
+use ethers::solc::remappings::RelativeRemapping;
 use foundry_config::{
     figment::{
         self,
@@ -46,6 +49,8 @@ use foundry_config::{
 };
 use serde::Serialize;
 use std::fmt::Debug;
+
+pub mod skip;
 
 foundry_config::merge_impl_figment_convert!(ZkBuildArgs, args);
 
@@ -92,6 +97,40 @@ pub struct ZkBuildArgs {
     #[serde(skip)]
     pub use_zksolc: String,
 
+    /// Compile contracts that contain the specified string in their filename.
+    #[clap(
+        help_heading = "ZkSync Compiler options",
+        help = "Compile only the contracts that contain the specified string in their filename.",
+        long = "match-contract",
+        short = 'm',
+        value_name = "CONTRACT_NAME_MATCH"
+    )]
+    pub match_contract: Option<String>,
+
+    /// Skip building files whose names contain the given filter.
+    ///
+    /// `test` and `script` are aliases for `.t.sol` and `.s.sol`.
+    #[clap(long, num_args(1..))]
+    #[serde(skip)]
+    pub skip: Option<Vec<SkipBuildFilter>>,
+
+    /// Use local rewriting for contract remapping instead of Solidity's remapping.
+    #[clap(
+        help_heading = "ZkSync Remapping options",
+        help = "Use a local rewriting approach for contract remapping instead of the standard Solidity remapping.",
+        long = "remap-local",
+        short = 'r'
+    )]
+    pub remap_local: bool,
+
+    // /// Directories to skip during compilation
+    // #[clap(
+    //     help_heading = "ZkSync Build options",
+    //     value_name = "SKIP_DIRS",
+    //     long = "skip-dirs",
+    //     num_args(1..),
+    // )]
+    // pub skip_dirs: Vec<String>,
     /// A flag indicating whether to enable the system contract compilation mode.
     #[clap(
         help_heading = "ZkSync Compiler options",
@@ -148,14 +187,20 @@ impl Cmd for ZkBuildArgs {
         let config = self.try_load_config_emit_warnings()?;
         let mut project = config.project()?;
 
+        // //get skip filters
+        // let filters = self.clone().skip.unwrap_or_default();
+
         //set zk out path
         let zk_out_path = project.paths.root.join("zkout");
         project.paths.artifacts = zk_out_path;
 
         let zksolc_manager = self.setup_zksolc_manager()?;
 
+        //get remappings
+        let remappings = config.remappings;
+
         println!("Compiling smart contracts...");
-        self.compile_smart_contracts(zksolc_manager, project)
+        self.compile_smart_contracts(zksolc_manager, project, remappings)
     }
 }
 
@@ -209,11 +254,16 @@ impl ZkBuildArgs {
         &self,
         zksolc_manager: ZkSolcManager,
         project: Project,
+        remappings: Vec<RelativeRemapping>,
     ) -> eyre::Result<()> {
         let zksolc_opts = ZkSolcOpts {
             compiler_path: zksolc_manager.get_full_compiler_path(),
             is_system: self.is_system,
             force_evmla: self.force_evmla,
+            match_contract: self.match_contract.clone(),
+            remap_local: self.remap_local,
+            remappings,
+            skip: self.skip.clone(),
         };
 
         let zksolc = ZkSolc::new(zksolc_opts, project);

@@ -52,6 +52,7 @@ use crate::{
     },
     opts::{EthereumOpts, TransactionOpts},
 };
+use chrono::Utc;
 use clap::{Parser, ValueHint};
 use ethers::{
     abi::Abi,
@@ -60,8 +61,13 @@ use ethers::{
 };
 use eyre::Context;
 use foundry_config::Config;
-use serde_json::Value;
-use std::{fs, path::PathBuf, str::FromStr};
+use serde_json::{json, Value};
+use std::{
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 use zksync_web3_rs::{
     providers::Provider,
     signers::{LocalWallet, Signer},
@@ -161,12 +167,12 @@ impl ZkCreateArgs {
     /// 8. A wallet is set up using the signer and the RPC URL.
     /// 9. The contract deployment is started.
     /// 10. If deployment is successful, the contract address, transaction hash, gas used, gas
-    ///     price, and block number are printed to the console.
+    ///     price, and block number are written to file and printed to the console.
     pub async fn run(self) -> eyre::Result<()> {
         let private_key = get_private_key(&self.eth.wallet.private_key)?;
         let rpc_url = get_rpc_url(&self.eth.rpc.url)?;
         let config = Config::from(&self.eth);
-        let chain = get_chain(config.chain_id)?;
+        let chain_id = get_chain(config.chain_id)?.id();
         let mut project = self.opts.project()?;
         project.paths.artifacts = project.paths.root.join("zkout");
 
@@ -177,11 +183,18 @@ impl ZkCreateArgs {
             }
         };
 
+        //write bytecode to file as string
+        let mut file = fs::File::create("bytecode_main.txt").unwrap();
+        file.write_all(format!("{:?}\n", bytecode.to_string()).as_bytes()).unwrap();
+
+        // //check for additional factory deps
+        // let factory_dependencies = self
+        //     .factory_deps
+        //     .as_ref()
+        //     .map(|fdep_contract_info| self.get_factory_dependencies(&project, fdep_contract_info));
+
         //check for additional factory deps
-        let factory_dependencies = self
-            .factory_deps
-            .as_ref()
-            .map(|fdep_contract_info| self.get_factory_dependencies(&project, fdep_contract_info));
+        let factory_dependencies = self.get_factory_dependencies_from_source(&project);
 
         // get abi
         let abi = match Self::get_abi_from_contract(&project, &self.contract) {
@@ -201,7 +214,7 @@ impl ZkCreateArgs {
         let constructor_args = self.get_constructor_args(&contract);
 
         let provider = Provider::try_from(rpc_url)?;
-        let wallet = LocalWallet::from_str(&format!("{private_key:?}"))?.with_chain_id(chain);
+        let wallet = LocalWallet::from_str(&format!("{private_key:?}"))?.with_chain_id(chain_id);
         let zk_wallet = ZKSWallet::new(wallet, None, Some(provider), None)?;
 
         let rcpt = zk_wallet
@@ -212,6 +225,20 @@ impl ZkCreateArgs {
         let gas_used = rcpt.gas_used.expect("Error retrieving gas used");
         let gas_price = rcpt.effective_gas_price.expect("Error retrieving gas price");
         let block_number = rcpt.block_number.expect("Error retrieving block number");
+
+        //FILE OUTPUT DEPLOYMENT DATA
+        let deploy_data = json!({
+            "contract_name": self.contract.name,
+            "timestamp": Utc::now().timestamp().to_string(),
+            "chain_id": chain_id.to_string(),
+            "block_number": block_number.to_string(),
+            "deployed address": deployed_address,
+            "transaction_hash": rcpt.transaction_hash,
+            "gas_price": gas_price.to_string(),
+            "gas_used": gas_used.to_string(),
+        });
+
+        save_deploy_data(&deploy_data).await?;
 
         println!("+-------------------------------------------------+");
         println!("Contract successfully deployed to address: {:#?}", deployed_address);
@@ -363,7 +390,7 @@ impl ZkCreateArgs {
     ///
     /// A vector of vectors of bytes that represents the bytecode of each factory dependency
     /// contract.
-    fn get_factory_dependencies(
+    fn _get_factory_dependencies(
         &self,
         project: &Project,
         fdep_contract_info: &[ContractInfo],
@@ -374,5 +401,100 @@ impl ZkCreateArgs {
             factory_deps.push(dep_bytecode.to_vec());
         }
         factory_deps
+    }
+
+    fn get_factory_dependencies_from_source(&self, project: &Project) -> Option<Vec<Vec<u8>>> {
+        let mut factory_deps = Vec::new();
+
+        let output_path = Self::get_path_for_contract_output(project, &self.contract);
+        let contract_output = Self::get_contract_output(output_path).unwrap();
+
+        // let depps = Self::get_factory_deps_from_contract(project, &self.contract, &contract_output);
+        let dep_paths = contract_output[self.contract.path.as_ref().unwrap()]
+            [self.contract.name.clone()]["factoryDependencies"]
+            .as_object()
+            .unwrap()
+            .values();
+
+        for path in dep_paths {
+            println!("Factory Dependency Detected - Path: {:?}", path.as_str().unwrap());
+
+            // Now, use each path to retrieve the bytecode of the imported contract
+            if let Ok(dep_bytecode) =
+                get_bytecode_from_imported_contract(&contract_output, path.as_str().unwrap())
+            {
+                //write bytecode to file as string
+                let mut file = fs::File::create("bytecode_dep.txt").unwrap();
+                file.write_all(format!("{:?}\n", dep_bytecode.to_string()).as_bytes()).unwrap();
+
+                factory_deps.push(dep_bytecode.to_vec());
+            } else {
+                println!("Failed to retrieve bytecode for imported contract: {:?}", path);
+            }
+        }
+
+        if factory_deps.is_empty() {
+            None
+        } else {
+            Some(factory_deps)
+        }
+    }
+}
+
+async fn save_deploy_data(deploy_data: &serde_json::Value) -> eyre::Result<()> {
+    let obj = deploy_data.as_object().ok_or_else(|| eyre::eyre!("Deploy data is not an object"))?;
+
+    let chain_id = obj
+        .get("chain_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| eyre::eyre!("Chain ID not found or not a string"))?;
+
+    let contract_name = obj
+        .get("contract_name")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| eyre::eyre!("Contract name not found or not a string"))?;
+
+    let timestamp = obj
+        .get("timestamp")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| eyre::eyre!("Timestamp not found or not a string"))?;
+
+    let deploy_data_path =
+        Path::new("zk_deploys").join(contract_name).join(chain_id).join(timestamp);
+
+    fs::create_dir_all(&deploy_data_path)?;
+
+    // Store deploy data
+    fs::File::create(deploy_data_path.join("deploy_data.json"))?
+        .write_all(serde_json::to_string_pretty(deploy_data)?.as_bytes())?;
+
+    // Update latest.json
+    let latest_path =
+        Path::new("zk_deploys").join(contract_name).join(chain_id).join("latest.json");
+    fs::File::create(&latest_path)?
+        .write_all(serde_json::to_string_pretty(deploy_data)?.as_bytes())?;
+
+    Ok(())
+}
+
+fn get_bytecode_from_imported_contract(
+    contracts_data: &serde_json::Value,
+    contract_path: &str,
+) -> eyre::Result<Bytes> {
+    //new ContractInfo from path
+    let dep_contract_info = ContractInfo::new(contract_path);
+
+    if let Some(contract_data) =
+        contracts_data[dep_contract_info.path.unwrap()][dep_contract_info.name].as_object()
+    {
+        if let Some(bytecode) = contract_data["evm"]["bytecode"]["object"].as_str() {
+            // Convert the bytecode hex string to bytes
+            let bytecode_bytes = hex::decode(bytecode)?;
+            Ok(Bytes::from(bytecode_bytes))
+        } else {
+            Err(eyre::eyre!("Bytecode not found for contract: {}", contract_path))
+        }
+    } else {
+        Err(eyre::eyre!("Contract not found: {}", contract_path))
     }
 }

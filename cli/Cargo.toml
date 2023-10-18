@@ -8,76 +8,75 @@ repository = "https://github.com/foundry-rs/foundry"
 version = "0.2.0"
 
 [build-dependencies]
-vergen = { version = "8", default-features = false, features = ["build", "git", "git2"] }
+vergen = {version = "8", default-features = false, features = ["build", "git", "git2"]}
 
 [dependencies]
 # foundry internal
-forge-fmt = { path = "../fmt" }
-forge-doc = { path = "../doc" }
-foundry-utils = { path = "../utils" }
-forge = { path = "../forge" }
-foundry-config = { path = "../config" }
-foundry-common = { path = "../common" }
-foundry-evm = { path = "../evm" }
-cast = { path = "../cast" }
-ui = { path = "../ui" }
+cast = {path = "../cast"}
+forge = {path = "../forge"}
+forge-doc = {path = "../doc"}
+forge-fmt = {path = "../fmt"}
+foundry-common = {path = "../common"}
+foundry-config = {path = "../config"}
+foundry-evm = {path = "../evm"}
+foundry-utils = {path = "../utils"}
+ui = {path = "../ui"}
 
 # eth
-ethers = { workspace = true, features = ["rustls"] }
+ethers = {workspace = true, features = ["rustls"]}
 solang-parser.workspace = true
 
 # cli
-clap = { version = "4", features = ["derive", "env", "unicode", "wrap_help"] }
+clap = {version = "4", features = ["derive", "env", "unicode", "wrap_help"]}
 clap_complete = "4"
 clap_complete_fig = "4"
-yansi = "0.5"
-tracing-error = "0.2"
-tracing-subscriber = { version = "0.3", features = ["registry", "env-filter", "fmt"] }
-tracing = "0.1"
-watchexec = "2"
 comfy-table = "6"
-reqwest = { version = "0.11", default-features = false, features = [
+dialoguer = {version = "0.10", default-features = false}
+dotenvy = "0.15"
+reqwest = {version = "0.11", default-features = false, features = [
   "json",
   "rustls",
   "rustls-tls-native-roots",
-] }
-dotenvy = "0.15"
-dialoguer = { version = "0.10", default-features = false }
+]}
+tracing = "0.1"
+tracing-error = "0.2"
+tracing-subscriber = {version = "0.3", features = ["registry", "env-filter", "fmt"]}
+watchexec = "2"
+yansi = "0.5"
 
 # async / parallel
-tokio = { version = "1", features = ["macros"] }
+async-trait = "0.1"
 futures = "0.3"
 rayon = "1"
-async-trait = "0.1"
+tokio = {version = "1", features = ["macros"]}
 
 # disk / paths
-walkdir = "2"
 dunce = "1"
 path-slash = "0.2"
 tempfile = "3"
+walkdir = "2"
 
 # misc
-eyre = "0.6"
-color-eyre = "0.6"
-rustc-hex = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-regex = { version = "1", default-features = false }
-rpassword = "7"
-hex = "0.4"
-itertools = "0.10"
-proptest = "1"
-semver = "1"
-once_cell = "1"
-similar = { version = "2", features = ["inline"] }
-strsim = "0.10"
 bytes = "1.4"
-strum = { version = "0.25", features = ["derive"] }
-thiserror = "1"
+color-eyre = "0.6"
+eyre = "0.6"
+hex = "0.4"
 indicatif = "0.17"
+itertools = "0.10"
+once_cell = "1"
 parking_lot = "0.12"
 pkg-config = "0.3.26"
-
+proptest = "1"
+regex = {version = "1", default-features = false}
+rpassword = "7"
+rustc-hex = "2"
+semver = "1"
+serde = {version = "1", features = ["derive"]}
+serde_json = "1"
+similar = {version = "2", features = ["inline"]}
+strsim = "0.10"
+strum = {version = "0.25", features = ["derive"]}
+thiserror = "1"
 
 # ring = "0.16.20"
 # sha2 = "0.10.6"
@@ -91,24 +90,29 @@ anyhow = {version = "1.0.70"}
 dirs = {version = "5.0.0"}
 url = "2.3.1"
 
+chrono = "0.4.31"
 ethabi = "18.0.0"
+md5 = "0.7.0"
+tiny-keccak = {version = "2.0.2", features = ["sha3"]}
 uint = "0.9.0"
+sha2 = "0.10.8"
+pathdiff = "0.2.1"
 
 [dev-dependencies]
-anvil = { path = "../anvil" }
-foundry-utils = { path = "./../utils" }
-foundry-cli-test-utils = { path = "./test-utils" }
-pretty_assertions = "1"
-toml = "0.7"
-serial_test = "2"
+anvil = {path = "../anvil"}
 criterion = "0.4"
-svm = { package = "svm-rs", version = "0.3", default-features = false, features = ["rustls"] }
+foundry-cli-test-utils = {path = "./test-utils"}
+foundry-utils = {path = "./../utils"}
 globset = "0.4"
+pretty_assertions = "1"
+serial_test = "2"
+svm = {package = "svm-rs", version = "0.3", default-features = false, features = ["rustls"]}
+toml = "0.7"
 
 [features]
 default = ["rustls"]
-rustls = ["ethers/rustls"]
 openssl = ["ethers/openssl"]
+rustls = ["ethers/rustls"]
 solc-asm = ["ethers/solc-sha2-asm"]
 
 # feature for integration tests that test external projects
