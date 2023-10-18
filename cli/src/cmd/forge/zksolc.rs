@@ -260,6 +260,8 @@ impl ZkSolc {
 
                 let mut contract_path_to_compile = contract_path.clone();
                 if !self.remap_local {
+                    // Disabling due to zksolc v 1.3.16 supporting remappings
+                    //
                     // Apply remappings for each contract dependency
                     // for (path, source) in &mut standard_json.sources {
                     //     remap_source_path(path, &self.remappings);
