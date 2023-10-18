@@ -196,9 +196,6 @@ impl ZkCreateArgs {
         //check for additional factory deps
         let factory_dependencies = self.get_factory_dependencies_from_source(&project);
 
-        //print factory dependencies
-        // println!("factory dependencies: {:?}", factory_dependencies);
-
         // get abi
         let abi = match Self::get_abi_from_contract(&project, &self.contract) {
             Ok(abi) => abi,
@@ -314,14 +311,9 @@ impl ZkCreateArgs {
         project: &Project,
         contract_info: &ContractInfo,
     ) -> eyre::Result<Bytes> {
-        //print contract info
-        println!("contract info: {:?}", contract_info);
         let output_path = Self::get_path_for_contract_output(project, contract_info);
-        println!("output path: {:?}", output_path);
         let contract_output = Self::get_contract_output(output_path)?;
-        // println!("contract output: {:?}", contract_output);
         let contract_file_codes = &contract_output[contract_info.path.as_ref().unwrap()];
-        // println!("contract file codes: {:?}", contract_file_codes);
         serde_json::from_value(
             contract_file_codes[&contract_info.name]["evm"]["bytecode"]["object"].clone(),
         )
@@ -414,16 +406,8 @@ impl ZkCreateArgs {
     fn get_factory_dependencies_from_source(&self, project: &Project) -> Option<Vec<Vec<u8>>> {
         let mut factory_deps = Vec::new();
 
-        //print contract info
-        println!("contract info: {:?}", self.contract);
         let output_path = Self::get_path_for_contract_output(project, &self.contract);
-        println!("output path: {:?}", output_path);
         let contract_output = Self::get_contract_output(output_path).unwrap();
-        println!(
-            "contract output: {:?}",
-            contract_output[self.contract.path.as_ref().unwrap()][self.contract.name.clone()]
-                ["factoryDependencies"]
-        );
 
         // let depps = Self::get_factory_deps_from_contract(project, &self.contract, &contract_output);
         let dep_paths = contract_output[self.contract.path.as_ref().unwrap()]
@@ -439,9 +423,8 @@ impl ZkCreateArgs {
             if let Ok(dep_bytecode) =
                 get_bytecode_from_imported_contract(&contract_output, path.as_str().unwrap())
             {
-                println!("Imported Contract Bytecode: {:?}", dep_bytecode);
                 //write bytecode to file as string
-                let mut file = fs::File::create("bytecode.txt").unwrap();
+                let mut file = fs::File::create("bytecode_dep.txt").unwrap();
                 file.write_all(format!("{:?}\n", dep_bytecode).as_bytes()).unwrap();
 
                 factory_deps.push(dep_bytecode.to_vec());
@@ -500,7 +483,6 @@ fn get_bytecode_from_imported_contract(
 ) -> eyre::Result<Bytes> {
     //new ContractInfo from path
     let dep_contract_info = ContractInfo::new(contract_path);
-    println!("dep contract info: {:?}", dep_contract_info);
 
     if let Some(contract_data) =
         contracts_data[dep_contract_info.path.unwrap()][dep_contract_info.name].as_object()
