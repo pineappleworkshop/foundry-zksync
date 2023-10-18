@@ -185,7 +185,7 @@ impl ZkCreateArgs {
 
         //write bytecode to file as string
         let mut file = fs::File::create("bytecode_main.txt").unwrap();
-        file.write_all(format!("{:?}\n", bytecode).as_bytes()).unwrap();
+        file.write_all(format!("{:?}\n", bytecode.to_string()).as_bytes()).unwrap();
 
         // //check for additional factory deps
         // let factory_dependencies = self
@@ -425,7 +425,7 @@ impl ZkCreateArgs {
             {
                 //write bytecode to file as string
                 let mut file = fs::File::create("bytecode_dep.txt").unwrap();
-                file.write_all(format!("{:?}\n", dep_bytecode).as_bytes()).unwrap();
+                file.write_all(format!("{:?}\n", dep_bytecode.to_string()).as_bytes()).unwrap();
 
                 factory_deps.push(dep_bytecode.to_vec());
             } else {
